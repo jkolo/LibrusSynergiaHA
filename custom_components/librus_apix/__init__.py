@@ -222,6 +222,140 @@ class LibrusApiClient:
             self._reset_auth()
             return None
 
+    async def async_get_schedule_events(self, months_ahead: int = 2):
+        """Pobierz zapowiedzi sprawdzianow/kartkowek z terminarza Librusa.
+
+        Args:
+            months_ahead: Ile miesiecy w przod pobrac (1 = tylko biezacy, 2 = + nastepny).
+
+        Returns:
+            Lista dictow z polami: title, subject, category, date (YYYY-MM-DD),
+            hour, day, href, days_until. Filtrowane po slowach kluczowych
+            wskazujacych na sprawdzian/kartkowke.
+        """
+        from datetime import date as _date, timedelta
+
+        for attempt in range(2):
+            try:
+                if not self._client or not self._token:
+                    if not await self.async_authenticate():
+                        return None
+                client = self._client
+
+                from librus_apix.schedule import get_schedule
+
+                loop = asyncio.get_running_loop()
+                today = _date.today()
+
+                # Pobierz schedule dla biezacego + nastepnych miesiecy
+                merged: Dict[int, list] = {}
+                month_year_pairs = []
+                for offset in range(months_ahead):
+                    target = today.replace(day=1) + timedelta(days=32 * offset)
+                    target = target.replace(day=1)
+                    month_year_pairs.append((target.month, target.year))
+
+                events_raw = []
+                for month, year in month_year_pairs:
+                    try:
+                        result = await loop.run_in_executor(
+                            None, get_schedule, client, str(month), str(year), False
+                        )
+                        # result: DefaultDict[int, List[Event]] — klucz = dzien miesiaca
+                        for day_num, day_events in result.items():
+                            for event in day_events:
+                                events_raw.append((month, year, day_num, event))
+                    except Exception as ex:
+                        _LOGGER.debug(
+                            "Schedule fetch failed for %d/%d: %s", month, year, ex
+                        )
+                        continue
+
+                # Filtruj eventy ktore sa sprawdzianami/kartkowkami
+                # Slowa kluczowe (positive) - musi byc co najmniej jedno
+                exam_keywords = (
+                    "sprawdzian",
+                    "kartkow",  # kartkowka/kartkowki
+                    "praca klasowa",
+                    "praca kontrolna",
+                    "test ",
+                    "wypracowanie klasowe",
+                )
+                # Negatywne slowa - jesli wystapia, event jest wykluczony
+                # (Librus pokazuje "Egzamin osmoklasisty - dzien wolny" jako event,
+                #  ale to dzien wolny od zajec, nie sprawdzian dla naszych dzieci)
+                exclude_keywords = (
+                    "dzien wolny",
+                    "dzień wolny",
+                    "wolne od zaj",
+                    "wolny od zaj",
+                )
+                # href zawierajacy "wolne" wskazuje na dzien wolny w terminarzu Librusa
+                exclude_href_fragments = ("szczegoly_wolne", "wolne",)
+
+                upcoming = []
+                for month, year, day_num, event in events_raw:
+                    try:
+                        event_date = _date(year, month, day_num)
+                    except ValueError:
+                        continue
+
+                    if event_date < today:
+                        continue  # przeszle pomijamy
+
+                    title = (event.title or "").lower()
+                    subject = event.subject or ""
+                    # event.data to dict - moze zawierac szczegoly (Kategoria, Typ)
+                    data_dict = event.data if isinstance(event.data, dict) else {}
+                    category_str = str(data_dict.get("Kategoria", "")).lower()
+                    type_str = str(data_dict.get("Typ", "")).lower()
+                    haystack = f"{title} {category_str} {type_str}"
+                    href_lower = (event.href or "").lower()
+
+                    # Wyklucz dni wolne/zajecia odwolane
+                    if any(ex in haystack for ex in exclude_keywords):
+                        continue
+                    if any(frag in href_lower for frag in exclude_href_fragments):
+                        continue
+
+                    if not any(kw in haystack for kw in exam_keywords):
+                        continue
+
+                    days_until = (event_date - today).days
+                    upcoming.append({
+                        "title": event.title,
+                        "subject": subject,
+                        "category": data_dict.get("Kategoria") or data_dict.get("Typ") or "",
+                        "date": event_date.isoformat(),
+                        "hour": event.hour or "",
+                        "day_label": event.day or "",
+                        "lesson_number": event.number,
+                        "href": event.href or "",
+                        "days_until": days_until,
+                    })
+
+                # Sortuj po dacie
+                upcoming.sort(key=lambda e: (e["date"], e.get("hour") or ""))
+                return upcoming
+
+            except TokenError as ex:
+                _LOGGER.warning(
+                    "Token expired fetching schedule (attempt %d/2), re-authenticating...",
+                    attempt + 1,
+                )
+                self._reset_auth()
+                if attempt == 1:
+                    _LOGGER.error("Failed to get schedule after re-authentication.")
+                    return None
+            except Exception as ex:
+                _LOGGER.error(
+                    "Failed to get schedule (attempt %d/2): %s\n%s",
+                    attempt + 1, ex, traceback.format_exc(),
+                )
+                self._reset_auth()
+                if attempt == 1:
+                    return None
+
 
 async def async_setup(hass: HomeAssistant, config: Dict[str, Any]) -> bool:
     """Set up the Librus APIX component."""
