@@ -6,13 +6,11 @@ import asyncio
 import logging
 from dataclasses import dataclass
 from datetime import date as _date, timedelta
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_PASSWORD, CONF_USERNAME
 from homeassistant.core import HomeAssistant
-from homeassistant.exceptions import ConfigEntryNotReady
-
 from librus_apix.client import Client, new_client
 from librus_apix.exceptions import TokenError
 from librus_apix.grades import get_grades
@@ -22,9 +20,7 @@ from librus_apix.student_information import get_student_information
 from librus_apix.timetable import get_timetable
 
 from .const import DOMAIN
-
-if TYPE_CHECKING:
-    from .sensor import LibrusDataUpdateCoordinator
+from .coordinator import LibrusDataUpdateCoordinator
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -487,26 +483,12 @@ class LibrusApiClient:
 
 async def async_setup_entry(hass: HomeAssistant, entry: LibrusConfigEntry) -> bool:
     """Set up Librus APIX from a config entry."""
-    username = entry.data[CONF_USERNAME]
-    password = entry.data[CONF_PASSWORD]
+    client = LibrusApiClient(entry.data[CONF_USERNAME], entry.data[CONF_PASSWORD])
 
-    client = LibrusApiClient(username, password)
-
-    # Test authentication; gdy Librus jest w maintenance lub niedostepny, rzuc
-    # ConfigEntryNotReady - HA bedzie automatycznie retryowal setup z exponential
-    # backoff zamiast porazki na stale (config_entry "setup_failed" wymaga manualnego
-    # reload). Librus ma okresowe przerwy techniczne raz dziennie, wiec retry jest
-    # kluczowy dla niezawodnosci.
-    if not await client.async_authenticate():
-        raise ConfigEntryNotReady(
-            f"Nie udalo sie zalogowac do Librus dla {username} (mozliwy maintenance Librus). "
-            "HA wykona retry automatycznie."
-        )
-
-    # Stworz coordinator wczesniej, zeby sensor i calendar uzyly tego samego.
-    from .sensor import LibrusDataUpdateCoordinator
-
-    coordinator = LibrusDataUpdateCoordinator(hass, client)
+    # Coordinator wykonuje pierwszy login w _async_setup() podczas
+    # async_config_entry_first_refresh(). On failure rzuca ConfigEntryNotReady
+    # (np. Librus maintenance) — HA retryuje setup z exponential backoff.
+    coordinator = LibrusDataUpdateCoordinator(hass, client, config_entry=entry)
     await coordinator.async_config_entry_first_refresh()
 
     entry.runtime_data = LibrusRuntimeData(client=client, coordinator=coordinator)
