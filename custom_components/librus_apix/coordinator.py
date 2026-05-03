@@ -75,11 +75,21 @@ _LIB_OUTDATED_THRESHOLD = 5
 ISSUE_LIB_OUTDATED = "librus_lib_outdated"
 ISSUE_AUTH_FAILED = "auth_failed"
 
-# Public event names (HA bus). v2.0.0 BREAKING: renamed from
-# librus_apix_nowa_* to librus_apix_new_*.
-EVENT_NEW_MESSAGE = f"{DOMAIN}_new_message"
-EVENT_NEW_GRADE = f"{DOMAIN}_new_grade"
-EVENT_NEW_EXAM = f"{DOMAIN}_new_exam"
+# Event entity keys (v3.0). Replace the legacy `hass.bus.fire` mechanism —
+# the coordinator now buffers payloads and event entities consume them via
+# `consume_pending_event(key)` in their listener.
+EVENT_KEY_NEW_MESSAGE = "new_message"
+EVENT_KEY_NEW_GRADE = "new_grade"
+EVENT_KEY_NEW_EXAM = "new_exam"
+EVENT_KEY_NEW_ANNOUNCEMENT = "new_announcement"
+EVENT_KEY_NEW_ABSENCE = "new_absence"
+EVENT_KEYS = (
+    EVENT_KEY_NEW_MESSAGE,
+    EVENT_KEY_NEW_GRADE,
+    EVENT_KEY_NEW_EXAM,
+    EVENT_KEY_NEW_ANNOUNCEMENT,
+    EVENT_KEY_NEW_ABSENCE,
+)
 
 
 def _is_recent(date_str: str) -> bool:
@@ -208,11 +218,17 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._seen_message_hrefs: OrderedDict[str, None] = OrderedDict()
         self._seen_grade_ids: OrderedDict[tuple, None] = OrderedDict()
         self._seen_exam_ids: OrderedDict[tuple, None] = OrderedDict()
+        self._seen_announcement_keys: OrderedDict[tuple, None] = OrderedDict()
+        self._seen_absence_keys: OrderedDict[tuple, None] = OrderedDict()
         self._first_run: bool = True
         # Tracks consecutive ticks where every endpoint returned None — used
         # to escalate to a repair issue suggesting a librus-apix upgrade
         # (Librus likely changed HTML/CSS, breaking the parser).
         self._consecutive_total_failures: int = 0
+        # Pending events buffer — coordinator stuffs latest unconsumed payload
+        # per event key here; event entities pop it in their listener and
+        # call `_trigger_event`. Replaces v2.x `hass.bus.fire` mechanism.
+        self._pending_events: dict[str, dict[str, Any]] = {}
         self._rng = rng or random.Random()
         # Custom scheduler state — see _schedule_next_refresh / async_shutdown.
         self._unsub_next: CALLBACK_TYPE | None = None
@@ -542,8 +558,8 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 "current_semester": current_semester,
             }
 
-            # First refresh: only seed seen-sets, do not fire events to avoid
-            # spurious notifications for everything that already exists.
+            # First refresh: only seed seen-sets, do not enqueue events to
+            # avoid spurious notifications for everything that already exists.
             if self._first_run:
                 self._first_run = False
                 for msg in annotated_messages:
@@ -558,8 +574,27 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                         self._seen_exam_ids,
                         (exam["date"], exam["subject"], exam["title"]),
                     )
+                for ann in announcements_list:
+                    _add_lru(
+                        self._seen_announcement_keys,
+                        (ann.get("date", ""), ann.get("title", "")),
+                    )
+                for att in attendance_list:
+                    if att.get("is_absence") or att.get("is_late"):
+                        _add_lru(
+                            self._seen_absence_keys,
+                            (
+                                att.get("date", ""),
+                                att.get("subject", ""),
+                                att.get("period"),
+                                att.get("symbol", ""),
+                            ),
+                        )
             else:
-                self._fire_events(annotated_messages, grades, exams_list)
+                self._enqueue_events(
+                    annotated_messages, grades, exams_list,
+                    announcements_list, attendance_list,
+                )
 
             # Successful refresh: clear the auth repair issue if present.
             self._clear_issue(ISSUE_AUTH_FAILED)
@@ -579,68 +614,112 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         except Exception as err:
             raise UpdateFailed(f"Librus API error: {err}") from err
 
-    def _fire_events(
+    def consume_pending_event(self, key: str) -> dict[str, Any] | None:
+        """Pop and return the latest payload for `key` (or None).
+
+        Called by `LibrusEvent` entities in their listener — replaces the
+        v2.x `hass.bus.fire` mechanism. Single-slot per key: if multiple
+        events arrived in one refresh, only the most recent is delivered
+        (event entity already shows full state.last_event with timestamp).
+        """
+        return self._pending_events.pop(key, None)
+
+    def _enqueue_events(
         self,
         messages: list[dict],
         grades: list[dict],
-        upcoming_exams: list[dict] | None = None,
+        upcoming_exams: list[dict],
+        announcements: list[dict],
+        attendance: list[dict],
     ) -> None:
-        """Emit HA bus events for newly observed messages/grades/exams.
+        """Buffer payloads for newly observed items so event entities emit them.
 
-        Event payload uses English keys (v2.0.0 BREAKING).
+        Mark-and-skip via per-domain LRU `_seen_*` sets — same logic as
+        legacy `_fire_events`, but writes to `_pending_events` instead of
+        `hass.bus`. Event entities pop the payload in their listener.
         """
         for msg in messages:
             href = msg.get("href", "")
             if href and href not in self._seen_message_hrefs:
                 _add_lru(self._seen_message_hrefs, href)
                 _LOGGER.debug("New message: %s", msg.get("title"))
-                self.hass.bus.fire(
-                    EVENT_NEW_MESSAGE,
-                    {
-                        "sender": msg.get("author", ""),
-                        "title": msg.get("title", ""),
-                        "date": msg.get("date", ""),
-                        "has_attachment": msg.get("has_attachment", False),
-                    },
-                )
+                self._pending_events[EVENT_KEY_NEW_MESSAGE] = {
+                    "sender": msg.get("author", ""),
+                    "title": msg.get("title", ""),
+                    "date": msg.get("date", ""),
+                    "has_attachment": msg.get("has_attachment", False),
+                }
 
         for grade in grades:
             grade_id = (grade["subject"], grade["date"], grade["grade"])
             if grade_id not in self._seen_grade_ids:
                 _add_lru(self._seen_grade_ids, grade_id)
                 _LOGGER.debug("New grade: %s %s", grade["subject"], grade["grade"])
-                self.hass.bus.fire(
-                    EVENT_NEW_GRADE,
-                    {
-                        "subject": grade["subject"],
-                        "grade": grade["grade"],
-                        "date": grade["date"],
-                        "category": grade["category"],
-                        "teacher": grade["teacher"],
-                    },
-                )
+                self._pending_events[EVENT_KEY_NEW_GRADE] = {
+                    "subject": grade["subject"],
+                    "grade": grade["grade"],
+                    "value": grade.get("value"),
+                    "weight": grade.get("weight"),
+                    "date": grade["date"],
+                    "category": grade["category"],
+                    "description": grade.get("description", ""),
+                    "teacher": grade["teacher"],
+                }
 
-        for exam in upcoming_exams or []:
+        for exam in upcoming_exams:
             exam_id = (exam["date"], exam["subject"], exam["title"])
             if exam_id not in self._seen_exam_ids:
                 _add_lru(self._seen_exam_ids, exam_id)
                 _LOGGER.debug(
                     "New exam announcement: %s %s (%s)",
-                    exam.get("subject"),
-                    exam.get("title"),
-                    exam.get("date"),
+                    exam.get("subject"), exam.get("title"), exam.get("date"),
                 )
-                self.hass.bus.fire(
-                    EVENT_NEW_EXAM,
-                    {
-                        "title": exam.get("title", ""),
-                        "subject": exam.get("subject", ""),
-                        "category": exam.get("category", ""),
-                        "date": exam.get("date", ""),
-                        "time": exam.get("hour", ""),
-                        "days_until": exam.get("days_until", 0),
-                    },
+                self._pending_events[EVENT_KEY_NEW_EXAM] = {
+                    "title": exam.get("title", ""),
+                    "subject": exam.get("subject", ""),
+                    "category": exam.get("category", ""),
+                    "date": exam.get("date", ""),
+                    "time": exam.get("hour", ""),
+                    "days_until": exam.get("days_until", 0),
+                }
+
+        for ann in announcements:
+            ann_key = (ann.get("date", ""), ann.get("title", ""))
+            if ann_key not in self._seen_announcement_keys:
+                _add_lru(self._seen_announcement_keys, ann_key)
+                _LOGGER.debug("New announcement: %s", ann.get("title"))
+                self._pending_events[EVENT_KEY_NEW_ANNOUNCEMENT] = {
+                    "title": ann.get("title", ""),
+                    "author": ann.get("author", ""),
+                    "date": ann.get("date", ""),
+                    "description": ann.get("description", ""),
+                }
+
+        for att in attendance:
+            if not (att.get("is_absence") or att.get("is_late")):
+                continue
+            abs_key = (
+                att.get("date", ""),
+                att.get("subject", ""),
+                att.get("period"),
+                att.get("symbol", ""),
+            )
+            if abs_key not in self._seen_absence_keys:
+                _add_lru(self._seen_absence_keys, abs_key)
+                _LOGGER.debug(
+                    "New absence: %s %s (%s)",
+                    att.get("date"), att.get("subject"), att.get("symbol"),
                 )
+                self._pending_events[EVENT_KEY_NEW_ABSENCE] = {
+                    "date": att.get("date", ""),
+                    "subject": att.get("subject", ""),
+                    "type": att.get("type", ""),
+                    "symbol": att.get("symbol", ""),
+                    "period": att.get("period"),
+                    "teacher": att.get("teacher", ""),
+                    "is_unjustified": bool(att.get("is_unjustified", False)),
+                    "is_late": bool(att.get("is_late", False)),
+                }
 
     def _annotate_messages(self, messages: list[dict] | None) -> list[dict]:
         """Mark fresh messages and return the list (in-place tagged copy)."""

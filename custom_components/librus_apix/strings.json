@@ -105,6 +105,23 @@
       "timetable": {
         "name": "Timetable"
       }
+    },
+    "event": {
+      "new_grade": {
+        "name": "New grade"
+      },
+      "new_message": {
+        "name": "New message"
+      },
+      "new_exam": {
+        "name": "New exam"
+      },
+      "new_announcement": {
+        "name": "New announcement"
+      },
+      "new_absence": {
+        "name": "New absence"
+      }
     }
   },
   "exceptions": {

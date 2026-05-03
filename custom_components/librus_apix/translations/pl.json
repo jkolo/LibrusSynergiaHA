@@ -105,6 +105,23 @@
       "timetable": {
         "name": "Plan lekcji"
       }
+    },
+    "event": {
+      "new_grade": {
+        "name": "Nowa ocena"
+      },
+      "new_message": {
+        "name": "Nowa wiadomość"
+      },
+      "new_exam": {
+        "name": "Nowa zapowiedź"
+      },
+      "new_announcement": {
+        "name": "Nowe ogłoszenie"
+      },
+      "new_absence": {
+        "name": "Nowa nieobecność"
+      }
     }
   },
   "exceptions": {
