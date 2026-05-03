@@ -70,5 +70,15 @@
     "auth_failed": {
       "message": "Uwierzytelnianie nie powiodło się — wprowadź hasło ponownie."
     }
+  },
+  "issues": {
+    "librus_lib_outdated": {
+      "title": "Parser Librus może być nieaktualny",
+      "description": "Integracja Librus nie zdołała pobrać żadnych danych dla użytkownika {username} przez kilka kolejnych odświeżeń. Najczęstsza przyczyna to zmiana struktury HTML/CSS po stronie Librusa — biblioteka `librus-apix` wymaga aktualizacji. Sprawdź issue tracker integracji w poszukiwaniu nowszej wersji."
+    },
+    "auth_failed": {
+      "title": "Wymagane ponowne uwierzytelnienie",
+      "description": "Uwierzytelnianie konta {username} nie powiodło się trwale. Home Assistant uruchomił ponowne uwierzytelnianie — otwórz Ustawienia → Urządzenia i Usługi i wprowadź nowe hasło do Librus, aby przywrócić integrację."
+    }
   }
 }
