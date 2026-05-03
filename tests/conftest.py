@@ -16,6 +16,25 @@ def auto_enable_custom_integrations(enable_custom_integrations):
     yield
 
 
+@pytest.fixture(autouse=True)
+def no_human_pauses():
+    """Cut human-like pauses to ~0 s for fast tests.
+
+    With the human-like sync feature each refresh inserts 3–15 s of pause
+    between endpoint fetches. Tests would block for ~30–60 s; we patch
+    `jitter_pause_seconds` in the coordinator module to return 0.0 so
+    `asyncio.sleep(0)` is a real no-op (yields once, doesn't disrupt
+    event loop scheduling like an AsyncMock would).
+    """
+    # Unique sentinel value lets tests filter for "our" pauses among any
+    # other asyncio.sleep calls in the runtime.
+    with patch(
+        "custom_components.librus_apix.coordinator.jitter_pause_seconds",
+        return_value=0.0001,
+    ):
+        yield
+
+
 @pytest.fixture
 def mock_student_info():
     """Return a fake student_information object."""

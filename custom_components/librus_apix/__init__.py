@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import random
+import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date as _date, datetime as _dt, timedelta
@@ -314,7 +315,11 @@ class LibrusApiClient:
 
         def _work(client: Client) -> list[dict[str, Any]]:
             events_raw: list[tuple[int, int, int, Any]] = []
-            for month, year in month_year_pairs:
+            for idx, (month, year) in enumerate(month_year_pairs):
+                if idx > 0:
+                    # Human-like pause between consecutive month fetches
+                    # — sync sleep is fine, we run inside run_in_executor.
+                    time.sleep(self._rng.uniform(0.5, 3.0))
                 try:
                     result = get_schedule(client, str(month), str(year), False)
                 except TokenError:
@@ -419,6 +424,9 @@ class LibrusApiClient:
         def _work(client: Client) -> list[dict[str, Any]]:
             lessons: list[dict[str, Any]] = []
             for week_offset in range(weeks_ahead):
+                if week_offset > 0:
+                    # Human-like pause between consecutive week fetches.
+                    time.sleep(self._rng.uniform(0.5, 3.0))
                 target_monday = monday + timedelta(weeks=week_offset)
                 monday_dt = _dt.combine(target_monday, _dt.min.time())
                 try:
@@ -467,7 +475,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: LibrusConfigEntry) -> bo
     # Coordinator wykonuje pierwszy login w _async_setup() podczas
     # async_config_entry_first_refresh(). On failure rzuca ConfigEntryNotReady
     # (np. Librus maintenance) — HA retryuje setup z exponential backoff.
-    coordinator = LibrusDataUpdateCoordinator(hass, client, config_entry=entry)
+    # Osobny RNG dla koordynatora (kolejność/pauzy) — niezależny od UA-RNG
+    # by każdy refresh dawał inną kolejność, niezależnie od UA wybranego raz.
+    coord_rng = random.Random(f"{entry.entry_id}-coordinator")
+    coordinator = LibrusDataUpdateCoordinator(
+        hass, client, config_entry=entry, rng=coord_rng
+    )
     await coordinator.async_config_entry_first_refresh()
 
     entry.runtime_data = LibrusRuntimeData(client=client, coordinator=coordinator)

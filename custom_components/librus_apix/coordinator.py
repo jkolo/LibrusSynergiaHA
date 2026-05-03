@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
+import random
 from collections import OrderedDict
+from collections.abc import Awaitable, Callable
 from datetime import date, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
@@ -14,6 +17,7 @@ from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .const import DOMAIN, SCAN_INTERVAL
+from .humanize import jitter_pause_seconds, random_endpoint_order
 
 if TYPE_CHECKING:
     from . import LibrusApiClient
@@ -82,8 +86,17 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         hass: HomeAssistant,
         client: LibrusApiClient,
         config_entry: ConfigEntry | None = None,
+        *,
+        rng: random.Random | None = None,
     ) -> None:
-        """Initialize the coordinator."""
+        """Initialize the coordinator.
+
+        Args:
+            rng: Optional `random.Random` used for endpoint shuffling and
+                inter-fetch pause durations. Tests inject `Random(42)`;
+                production seeds by `entry_id` upstream so each child has
+                a stable but distinct order pattern.
+        """
         self.client = client
         self._seen_message_hrefs: OrderedDict[str, None] = OrderedDict()
         self._seen_grade_ids: OrderedDict[tuple, None] = OrderedDict()
@@ -93,6 +106,7 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # to escalate to a repair issue suggesting a librus-apix upgrade
         # (Librus likely changed HTML/CSS, breaking the parser).
         self._consecutive_total_failures: int = 0
+        self._rng = rng or random.Random()
         super().__init__(
             hass,
             _LOGGER,
@@ -156,20 +170,43 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         current_semester = 1 if date.today().month >= 9 else 2
 
         try:
-            student_info = await self.client.async_get_student_information()
-            grades = await self.client.async_get_grades()
-            messages = await self.client.async_get_messages(count=10)
-            # Fetch the full schedule once: sensor.zapowiedzi uses only exam
-            # events, calendar.terminarz uses everything.
-            schedule_all = await self.client.async_get_schedule_events(
-                months_ahead=2, only_exams=False
-            )
+            # Endpoint fetchers, addressed by name. Order is shuffled below
+            # per-refresh so the traffic pattern doesn't betray a robot.
+            fetchers: dict[str, Callable[[], Awaitable[Any]]] = {
+                "student_info": self.client.async_get_student_information,
+                "grades": self.client.async_get_grades,
+                "messages": lambda: self.client.async_get_messages(count=10),
+                # Fetch the full schedule once: sensor.zapowiedzi uses only
+                # exam events, calendar.terminarz uses everything.
+                "schedule": lambda: self.client.async_get_schedule_events(
+                    months_ahead=2, only_exams=False
+                ),
+                "timetable": lambda: self.client.async_get_timetable_events(
+                    weeks_ahead=4
+                ),
+            }
+            order = random_endpoint_order(self._rng, list(fetchers))
+            _LOGGER.debug("Refresh fetch order: %s", order)
+            results: dict[str, Any] = {}
+            for i, name in enumerate(order):
+                results[name] = await fetchers[name]()
+                if i < len(order) - 1:
+                    pause = jitter_pause_seconds(self._rng)
+                    _LOGGER.debug(
+                        "Pause %.2fs before next fetch after %s", pause, name
+                    )
+                    await asyncio.sleep(pause)
+
+            student_info = results["student_info"]
+            grades = results["grades"]
+            messages = results["messages"]
+            schedule_all = results["schedule"]
             upcoming_exams = (
                 [e for e in schedule_all if e.get("is_exam")]
                 if schedule_all is not None
                 else None
             )
-            timetable = await self.client.async_get_timetable_events(weeks_ahead=4)
+            timetable = results["timetable"]
 
             # Detect "every endpoint failed" (None) — indicates a likely
             # parser breakage in librus-apix. Threshold guards against a
