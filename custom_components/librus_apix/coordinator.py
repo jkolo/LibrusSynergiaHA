@@ -23,11 +23,11 @@ _LOGGER = logging.getLogger(__name__)
 # would otherwise let these grow unbounded over months/years.
 _MAX_SEEN_ITEMS = 500
 
-# Public event names — Polish historical names kept for user automations.
-# Renamed in EPIC 9 (BREAKING) to librus_apix_new_*.
-EVENT_NOWA_WIADOMOSC = f"{DOMAIN}_nowa_wiadomosc"
-EVENT_NOWA_OCENA = f"{DOMAIN}_nowa_ocena"
-EVENT_NOWA_ZAPOWIEDZ = f"{DOMAIN}_nowa_zapowiedz"
+# Public event names (HA bus). v2.0.0 BREAKING: renamed from
+# librus_apix_nowa_* to librus_apix_new_*.
+EVENT_NEW_MESSAGE = f"{DOMAIN}_new_message"
+EVENT_NEW_GRADE = f"{DOMAIN}_new_grade"
+EVENT_NEW_EXAM = f"{DOMAIN}_new_exam"
 
 
 def _is_recent(date_str: str) -> bool:
@@ -164,12 +164,12 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 if subject not in grades_by_subject:
                     grades_by_subject[subject] = []
                 grades_by_subject[subject].append({
-                    "ocena": grade["grade"],
-                    "data": grade["date"],
-                    "kategoria": grade["category"],
-                    "nauczyciel": grade["teacher"],
-                    "semestr": grade.get("semester"),
-                    "jest_nowa": _is_recent(grade["date"]),
+                    "grade": grade["grade"],
+                    "date": grade["date"],
+                    "category": grade["category"],
+                    "teacher": grade["teacher"],
+                    "semester": grade.get("semester"),
+                    "is_recent": _is_recent(grade["date"]),
                 })
 
             annotated_messages = self._annotate_messages(messages)
@@ -224,19 +224,22 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         grades: list[dict],
         upcoming_exams: list[dict] | None = None,
     ) -> None:
-        """Emit HA bus events for newly observed messages/grades/exams."""
+        """Emit HA bus events for newly observed messages/grades/exams.
+
+        Event payload uses English keys (v2.0.0 BREAKING).
+        """
         for msg in messages:
             href = msg.get("href", "")
             if href and href not in self._seen_message_hrefs:
                 _add_lru(self._seen_message_hrefs, href)
                 _LOGGER.debug("New message: %s", msg.get("title"))
                 self.hass.bus.fire(
-                    EVENT_NOWA_WIADOMOSC,
+                    EVENT_NEW_MESSAGE,
                     {
-                        "nadawca": msg.get("author", ""),
-                        "temat": msg.get("title", ""),
-                        "data": msg.get("date", ""),
-                        "ma_zalacznik": msg.get("has_attachment", False),
+                        "sender": msg.get("author", ""),
+                        "title": msg.get("title", ""),
+                        "date": msg.get("date", ""),
+                        "has_attachment": msg.get("has_attachment", False),
                     },
                 )
 
@@ -246,13 +249,13 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 _add_lru(self._seen_grade_ids, grade_id)
                 _LOGGER.debug("New grade: %s %s", grade["subject"], grade["grade"])
                 self.hass.bus.fire(
-                    EVENT_NOWA_OCENA,
+                    EVENT_NEW_GRADE,
                     {
-                        "przedmiot": grade["subject"],
-                        "ocena": grade["grade"],
-                        "data": grade["date"],
-                        "kategoria": grade["category"],
-                        "nauczyciel": grade["teacher"],
+                        "subject": grade["subject"],
+                        "grade": grade["grade"],
+                        "date": grade["date"],
+                        "category": grade["category"],
+                        "teacher": grade["teacher"],
                     },
                 )
 
@@ -267,14 +270,14 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     exam.get("date"),
                 )
                 self.hass.bus.fire(
-                    EVENT_NOWA_ZAPOWIEDZ,
+                    EVENT_NEW_EXAM,
                     {
-                        "tytul": exam.get("title", ""),
-                        "przedmiot": exam.get("subject", ""),
-                        "kategoria": exam.get("category", ""),
-                        "data": exam.get("date", ""),
-                        "godzina": exam.get("hour", ""),
-                        "dni_do": exam.get("days_until", 0),
+                        "title": exam.get("title", ""),
+                        "subject": exam.get("subject", ""),
+                        "category": exam.get("category", ""),
+                        "date": exam.get("date", ""),
+                        "time": exam.get("hour", ""),
+                        "days_until": exam.get("days_until", 0),
                     },
                 )
 
@@ -282,6 +285,6 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """Mark fresh messages and return the list (in-place tagged copy)."""
         result = []
         for msg in messages or []:
-            msg["jest_nowa"] = _is_recent(msg.get("date", ""))
+            msg["is_recent"] = _is_recent(msg.get("date", ""))
             result.append(msg)
         return result

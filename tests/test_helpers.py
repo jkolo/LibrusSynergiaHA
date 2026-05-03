@@ -18,30 +18,30 @@ class TestGradeAverage:
         assert _grade_average([]) is None
 
     def test_only_invalid_returns_none(self):
-        assert _grade_average([{"ocena": "X"}, {"ocena": ""}]) is None
+        assert _grade_average([{"grade": "X"}, {"grade": ""}]) is None
 
     def test_single_grade(self):
-        assert _grade_average([{"ocena": "4"}]) == 4.0
+        assert _grade_average([{"grade": "4"}]) == 4.0
 
     def test_plus_adds_half(self):
-        assert _grade_average([{"ocena": "4+"}]) == 4.5
+        assert _grade_average([{"grade": "4+"}]) == 4.5
 
     def test_minus_subtracts_quarter(self):
-        assert _grade_average([{"ocena": "4-"}]) == 3.75
+        assert _grade_average([{"grade": "4-"}]) == 3.75
 
     def test_average_of_mixed(self):
         # (5 + 3 + 4.5) / 3 = 4.166... → 4.17
         assert _grade_average([
-            {"ocena": "5"},
-            {"ocena": "3"},
-            {"ocena": "4+"},
+            {"grade": "5"},
+            {"grade": "3"},
+            {"grade": "4+"},
         ]) == 4.17
 
     def test_invalid_skipped_not_failed(self):
         # 5 valid + 1 invalid → average from the valid one only
         assert _grade_average([
-            {"ocena": "5"},
-            {"ocena": "abc"},
+            {"grade": "5"},
+            {"grade": "abc"},
         ]) == 5.0
 
 
