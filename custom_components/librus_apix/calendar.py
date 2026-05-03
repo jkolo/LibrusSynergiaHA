@@ -1,10 +1,14 @@
 """Calendar platform dla Librus Synergia HA.
 
-Dwa kalendarze per config_entry (per dziecko):
+Cztery kalendarze per config_entry (per dziecko):
 - calendar.librus_<dziecko>_terminarz - cały terminarz Librusa (sprawdziany, dni
   wolne, inne) z tagami [SPRAWDZIAN]/[KARTKOWKA]/[PRACA-KLASOWA]/[WOLNE]/[INFO]
   na poczatku summary do filtrowania.
 - calendar.librus_<dziecko>_plan_lekcji - plan lekcji (timetable).
+- calendar.librus_<dziecko>_obecnosci - nieobecnosci/spoznienia/zwolnienia
+  z tagami [NIEOBECNOSC]/[SPOZNIENIE]/[USPRAWIEDLIWIONA]/[ZWOLNIENIE]/...
+- calendar.librus_<dziecko>_oceny - oceny jako eventy w dniu wystawienia
+  z tagami [OCENA 5]/[OCENA 4+]/[OCENA OPISOWA].
 """
 from __future__ import annotations
 
@@ -40,6 +44,20 @@ EVENT_TYPE_TAGS = {
 }
 
 
+# Map: Librus attendance symbol → (display tag, emoji).
+# `ob` (present) is intentionally absent — it doesn't surface as a calendar
+# event. Symbols match the librus-apix Attendance.symbol field.
+ATTENDANCE_TAGS = {
+    "nb": ("NIEOBECNOSC", "❌"),
+    "u": ("USPRAWIEDLIWIONA", "✓"),
+    "sp": ("SPOZNIENIE", "⏰"),
+    "zw": ("ZWOLNIENIE", "🏥"),
+    "wy": ("WYCIECZKA", "🎒"),
+    "k": ("KONKURS", "🏆"),
+    "sz": ("SZKOLENIE", "📚"),
+}
+
+
 async def async_setup_entry(
     hass: HomeAssistant,
     config_entry: ConfigEntry,
@@ -50,6 +68,8 @@ async def async_setup_entry(
     async_add_entities([
         LibrusScheduleCalendar(coordinator, config_entry),
         LibrusTimetableCalendar(coordinator, config_entry),
+        LibrusAttendanceCalendar(coordinator, config_entry),
+        LibrusGradesCalendar(coordinator, config_entry),
     ])
 
 
@@ -174,6 +194,104 @@ def _lesson_to_calendar_event(period: dict) -> CalendarEvent | None:
     )
 
 
+def _attendance_to_calendar_event(raw: dict) -> CalendarEvent | None:
+    """Konwertuj wpis frekwencji na full-day CalendarEvent z tagiem.
+
+    Zwraca None gdy wpis to obecność (`ob`) lub gdy symbol nieznany —
+    obecność nie jest wydarzeniem, nieznany symbol nie ma sensownego mapowania.
+    """
+    symbol = raw.get("symbol") or ""
+    if symbol == "ob" or raw.get("is_present"):
+        return None
+    if symbol not in ATTENDANCE_TAGS:
+        return None
+    date_iso = raw.get("date") or ""
+    if not date_iso:
+        return None
+    try:
+        event_date = _date.fromisoformat(date_iso)
+    except ValueError:
+        return None
+
+    tag, emoji = ATTENDANCE_TAGS[symbol]
+    subject = raw.get("subject") or "(brak przedmiotu)"
+    summary = f"{emoji} [{tag}] {subject}"
+
+    desc_parts: list[str] = []
+    if raw.get("type"):
+        desc_parts.append(f"Typ: {raw['type']}")
+    period = raw.get("period")
+    if period is not None and period != "":
+        desc_parts.append(f"Lekcja: {period}")
+    if raw.get("teacher"):
+        desc_parts.append(f"Nauczyciel: {raw['teacher']}")
+    if raw.get("topic"):
+        desc_parts.append(f"Temat: {raw['topic']}")
+    description = "\n".join(desc_parts)
+
+    return CalendarEvent(
+        start=event_date,
+        end=event_date + timedelta(days=1),
+        summary=summary,
+        description=description,
+    )
+
+
+def _grade_to_calendar_event(raw: dict) -> CalendarEvent | None:
+    """Konwertuj ocenę na full-day CalendarEvent z tagiem [OCENA <wartość>].
+
+    Oceny opisowe (`type=descriptive`) → tag [OCENA OPISOWA].
+    """
+    date_iso = raw.get("date") or ""
+    if not date_iso:
+        return None
+    try:
+        event_date = _date.fromisoformat(date_iso)
+    except ValueError:
+        return None
+
+    grade_text = (raw.get("grade") or "").strip()
+    grade_type = raw.get("type") or "numeric"
+
+    if grade_type == "descriptive":
+        tag = "OCENA OPISOWA"
+    else:
+        tag = f"OCENA {grade_text}" if grade_text else "OCENA"
+
+    subject = raw.get("subject") or "(brak przedmiotu)"
+    category = raw.get("category") or ""
+    parts = [subject]
+    if category:
+        parts.append(category)
+    body = " — ".join(parts)
+    summary = f"📊 [{tag}] {body}"
+
+    desc_parts: list[str] = []
+    if grade_text and grade_type != "descriptive":
+        desc_parts.append(f"Ocena: {grade_text}")
+    if raw.get("title"):
+        desc_parts.append(f"Tytuł: {raw['title']}")
+    if raw.get("teacher"):
+        desc_parts.append(f"Nauczyciel: {raw['teacher']}")
+    weight = raw.get("weight")
+    if weight is not None and weight != "":
+        desc_parts.append(f"Waga: {weight}")
+    if "counts" in raw:
+        desc_parts.append(
+            f"Liczy się do średniej: {'tak' if raw.get('counts') else 'nie'}"
+        )
+    if raw.get("description"):
+        desc_parts.append(f"Opis: {raw['description']}")
+    description = "\n".join(desc_parts)
+
+    return CalendarEvent(
+        start=event_date,
+        end=event_date + timedelta(days=1),
+        summary=summary,
+        description=description,
+    )
+
+
 class LibrusBaseCalendar(LibrusBaseEntity, CalendarEntity):
     """Base class for Librus calendar entities."""
 
@@ -277,3 +395,37 @@ class LibrusTimetableCalendar(LibrusBaseCalendar):
 
     def _convert(self, raw: dict) -> CalendarEvent | None:
         return _lesson_to_calendar_event(raw)
+
+
+class LibrusAttendanceCalendar(LibrusBaseCalendar):
+    """Calendar of attendance entries — absences, lates, releases, etc."""
+
+    _attr_translation_key = "attendance"
+    _attr_icon = "mdi:calendar-account"
+
+    def __init__(self, coordinator, config_entry: ConfigEntry) -> None:
+        super().__init__(coordinator, config_entry)
+        self._attr_unique_id = f"{config_entry.entry_id}_calendar_obecnosci"
+
+    def _all_events(self) -> list[dict]:
+        return (self.coordinator.data or {}).get("attendance") or []
+
+    def _convert(self, raw: dict) -> CalendarEvent | None:
+        return _attendance_to_calendar_event(raw)
+
+
+class LibrusGradesCalendar(LibrusBaseCalendar):
+    """Calendar of grades — each grade as a full-day event with [OCENA …] tag."""
+
+    _attr_translation_key = "grades_calendar"
+    _attr_icon = "mdi:calendar-star"
+
+    def __init__(self, coordinator, config_entry: ConfigEntry) -> None:
+        super().__init__(coordinator, config_entry)
+        self._attr_unique_id = f"{config_entry.entry_id}_calendar_oceny"
+
+    def _all_events(self) -> list[dict]:
+        return (self.coordinator.data or {}).get("grades") or []
+
+    def _convert(self, raw: dict) -> CalendarEvent | None:
+        return _grade_to_calendar_event(raw)

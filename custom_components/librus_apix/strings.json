@@ -104,6 +104,12 @@
       },
       "timetable": {
         "name": "Timetable"
+      },
+      "attendance": {
+        "name": "Attendance"
+      },
+      "grades_calendar": {
+        "name": "Grades"
       }
     },
     "event": {
