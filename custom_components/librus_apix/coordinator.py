@@ -113,6 +113,76 @@ def _add_lru(items: OrderedDict[Any, None], key: Any) -> None:
             items.popitem(last=False)
 
 
+def _attendance_frequency(
+    attendance: list[dict] | None, current_semester: int
+) -> dict[str, float]:
+    """Compute (sem1, sem2, total, current) attendance percentages.
+
+    Frequency = present_count / (present_count + counted_absences) × 100.
+    Counted absences: nieobecności (`nb`, `u`) i spóźnienia (`sp`). Wycieczki,
+    konkursy, szkolenia, zwolnienia liczymy jako obecność (dziecko jest pod
+    opieką szkoły).
+    """
+    if not attendance:
+        return {"semester_1": 0.0, "semester_2": 0.0, "total": 0.0, "current": 0.0}
+
+    counts = {1: {"present": 0, "missed": 0}, 2: {"present": 0, "missed": 0}}
+    for entry in attendance:
+        sem = entry.get("semester")
+        if sem not in counts:
+            continue
+        if entry.get("is_present") or entry.get("excursion"):
+            counts[sem]["present"] += 1
+        elif entry.get("is_absence") or entry.get("is_late"):
+            counts[sem]["missed"] += 1
+
+    def _pct(c: dict[str, int]) -> float:
+        total = c["present"] + c["missed"]
+        return round(c["present"] / total * 100.0, 2) if total else 0.0
+
+    sem1 = _pct(counts[1])
+    sem2 = _pct(counts[2])
+    total_present = counts[1]["present"] + counts[2]["present"]
+    total_missed = counts[1]["missed"] + counts[2]["missed"]
+    total = (
+        round(total_present / (total_present + total_missed) * 100.0, 2)
+        if (total_present + total_missed)
+        else 0.0
+    )
+    current = sem1 if current_semester == 1 else sem2
+    return {
+        "semester_1": sem1,
+        "semester_2": sem2,
+        "total": total,
+        "current": current,
+    }
+
+
+def _attendance_by_subject(
+    attendance: list[dict] | None,
+) -> dict[str, dict[str, int | float]]:
+    """For each subject return present/missed counts and frequency %."""
+    if not attendance:
+        return {}
+    by_subject: dict[str, dict[str, int]] = {}
+    for entry in attendance:
+        subject = entry.get("subject") or "(unknown)"
+        bucket = by_subject.setdefault(subject, {"present": 0, "missed": 0})
+        if entry.get("is_present") or entry.get("excursion"):
+            bucket["present"] += 1
+        elif entry.get("is_absence") or entry.get("is_late"):
+            bucket["missed"] += 1
+    out: dict[str, dict[str, int | float]] = {}
+    for subject, c in by_subject.items():
+        total = c["present"] + c["missed"]
+        out[subject] = {
+            "present": c["present"],
+            "missed": c["missed"],
+            "frequency": round(c["present"] / total * 100.0, 2) if total else 0.0,
+        }
+    return out
+
+
 class LibrusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     """Coordinator fetching student data from Librus."""
 
@@ -315,6 +385,8 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 "timetable": lambda: self.client.async_get_timetable_events(
                     weeks_ahead=4
                 ),
+                "attendance": self.client.async_get_attendance,
+                "announcements": self.client.async_get_announcements,
             }
             humanize = self._opt_humanize()
             order = (
@@ -345,13 +417,18 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 else None
             )
             timetable = results["timetable"]
+            attendance = results["attendance"]
+            announcements = results["announcements"]
 
             # Detect "every endpoint failed" (None) — indicates a likely
             # parser breakage in librus-apix. Threshold guards against a
             # single transient outage triggering a repair notification.
             all_none = all(
                 v is None
-                for v in (student_info, grades, messages, schedule_all, timetable)
+                for v in (
+                    student_info, grades, messages, schedule_all, timetable,
+                    attendance, announcements,
+                )
             )
             if all_none:
                 self._consecutive_total_failures += 1
@@ -395,6 +472,27 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                         if timetable is not None
                         else prev.get("timetable", [])
                     ),
+                    "attendance": (
+                        attendance
+                        if attendance is not None
+                        else prev.get("attendance", [])
+                    ),
+                    "attendance_frequency": _attendance_frequency(
+                        attendance
+                        if attendance is not None
+                        else prev.get("attendance", []),
+                        current_semester,
+                    ),
+                    "attendance_by_subject": _attendance_by_subject(
+                        attendance
+                        if attendance is not None
+                        else prev.get("attendance", [])
+                    ),
+                    "announcements": (
+                        announcements
+                        if announcements is not None
+                        else prev.get("announcements", [])
+                    ),
                     "current_semester": current_semester,
                 }
 
@@ -416,6 +514,9 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             annotated_messages = self._annotate_messages(messages)
             exams_list = upcoming_exams if upcoming_exams is not None else []
 
+            attendance_list = attendance if attendance is not None else []
+            announcements_list = announcements if announcements is not None else []
+
             result = {
                 "student_info": student_info,
                 "grades": grades,
@@ -424,6 +525,12 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 "upcoming_exams": exams_list,
                 "schedule": schedule_all if schedule_all is not None else [],
                 "timetable": timetable if timetable is not None else [],
+                "attendance": attendance_list,
+                "attendance_frequency": _attendance_frequency(
+                    attendance_list, current_semester
+                ),
+                "attendance_by_subject": _attendance_by_subject(attendance_list),
+                "announcements": announcements_list,
                 "current_semester": current_semester,
             }
 
