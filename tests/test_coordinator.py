@@ -300,6 +300,56 @@ async def test_pause_invoked_between_endpoints(hass: HomeAssistant, fake_client)
     assert len(pause_seconds) == 4
 
 
+async def test_schedule_next_refresh_uses_async_call_later(
+    hass: HomeAssistant, fake_client
+):
+    """schedule_next_refresh wola async_call_later z delay z next_run_delay."""
+    import random as _random
+    from unittest.mock import patch
+
+    coordinator = LibrusDataUpdateCoordinator(
+        hass, fake_client, rng=_random.Random(42)
+    )
+
+    with patch(
+        "custom_components.librus_apix.coordinator.async_call_later"
+    ) as call_later:
+        coordinator.schedule_next_refresh()
+
+    assert call_later.called
+    args = call_later.call_args.args
+    # Sygnatura: async_call_later(hass, delay_seconds, callback).
+    assert args[0] is hass
+    delay = args[1]
+    # Default base 120 min × ±25 % jitter → [90, 150] min.
+    assert 90 * 60 <= delay <= 150 * 60
+
+
+async def test_async_shutdown_cancels_pending_refresh(
+    hass: HomeAssistant, fake_client
+):
+    """async_shutdown anuluje zaplanowany async_call_later."""
+    import random as _random
+    from unittest.mock import MagicMock, patch
+
+    coordinator = LibrusDataUpdateCoordinator(
+        hass, fake_client, rng=_random.Random(42)
+    )
+
+    cancel_handle = MagicMock()
+    with patch(
+        "custom_components.librus_apix.coordinator.async_call_later",
+        return_value=cancel_handle,
+    ):
+        coordinator.schedule_next_refresh()
+        assert coordinator._unsub_next is cancel_handle
+
+        await coordinator.async_shutdown()
+
+    cancel_handle.assert_called_once()
+    assert coordinator._unsub_next is None
+
+
 async def test_repair_issue_auth_failed_on_libraryauth_error(
     hass: HomeAssistant, fake_client, mock_config_entry
 ):

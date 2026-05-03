@@ -483,6 +483,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: LibrusConfigEntry) -> bo
     )
     await coordinator.async_config_entry_first_refresh()
 
+    # Custom scheduler kicks off here so coordinator.data["schedule"] is
+    # already populated from the first refresh — future PR 5 will read it
+    # to slow down on school holidays.
+    coordinator.schedule_next_refresh()
+
     entry.runtime_data = LibrusRuntimeData(client=client, coordinator=coordinator)
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
