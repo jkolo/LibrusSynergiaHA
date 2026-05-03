@@ -40,7 +40,7 @@ def _grade_average(grades: list[dict]) -> float | None:
     """
     values: list[float] = []
     for g in grades:
-        grade_str = g.get("ocena", "")
+        grade_str = g.get("grade", "")
         try:
             base = float(grade_str[0])
             if len(grade_str) > 1:
@@ -69,11 +69,11 @@ def _attrs_uczen(data: dict[str, Any]) -> dict[str, Any]:
     if not info:
         return {}
     return {
-        "klasa": info.class_name,
-        "numer_w_klasie": info.number,
-        "wychowawca": info.tutor,
-        "szkola": info.school,
-        "szczesliwy_numerek": info.lucky_number,
+        "class_name": info.class_name,
+        "class_number": info.number,
+        "homeroom_teacher": info.tutor,
+        "school": info.school,
+        "lucky_number": info.lucky_number,
     }
 
 
@@ -89,17 +89,16 @@ def _val_grades_count(data: dict[str, Any]) -> StateType:
 def _attrs_grades(data: dict[str, Any]) -> dict[str, Any]:
     grades_by_subject = data.get("grades_by_subject", {})
     has_new = any(
-        g["jest_nowa"]
+        g["is_recent"]
         for subject_grades in grades_by_subject.values()
         for g in subject_grades
     )
     return {
-        # Polish keys = public API; renamed in EPIC 9 (BREAKING).
-        "oceny_wg_przedmiotu": grades_by_subject,
-        "liczba_ocen": len(data.get("grades", [])),
-        "liczba_przedmiotow": len(grades_by_subject),
-        "sa_nowe_oceny": has_new,
-        "semestr": data.get("current_semester"),
+        "grades_by_subject": grades_by_subject,
+        "grade_count": len(data.get("grades", [])),
+        "subject_count": len(grades_by_subject),
+        "has_new_grades": has_new,
+        "semester": data.get("current_semester"),
     }
 
 
@@ -119,8 +118,8 @@ def _attrs_overall_average(data: dict[str, Any]) -> dict[str, Any]:
         if _grade_average(subject_grades) is not None
     }
     return {
-        "srednie_wg_przedmiotow": averages_by_subject,
-        "semestr": data.get("current_semester"),
+        "averages_by_subject": averages_by_subject,
+        "semester": data.get("current_semester"),
     }
 
 
@@ -131,22 +130,22 @@ def _val_unread_count(data: dict[str, Any]) -> StateType:
 
 def _attrs_messages(data: dict[str, Any]) -> dict[str, Any]:
     # Full list (up to 10) for consistent counters with native_value;
-    # the displayed "wiadomosci" list is limited to 5.
+    # the displayed "messages" list is limited to 5.
     all_msgs = data.get("messages", [])
     return {
-        "wiadomosci": [
+        "messages": [
             {
-                "nadawca": m["author"],
-                "temat": m["title"],
-                "data": m["date"],
-                "nieprzeczytana": m.get("unread", False),
-                "jest_nowa": m.get("jest_nowa", False),
-                "ma_zalacznik": m.get("has_attachment", False),
+                "sender": m["author"],
+                "title": m["title"],
+                "date": m["date"],
+                "unread": m.get("unread", False),
+                "is_recent": m.get("is_recent", False),
+                "has_attachment": m.get("has_attachment", False),
             }
             for m in all_msgs[:5]
         ],
-        "liczba_nieprzeczytanych": sum(1 for m in all_msgs if m.get("unread", False)),
-        "sa_nowe_wiadomosci": any(m.get("jest_nowa", False) for m in all_msgs),
+        "unread_count": sum(1 for m in all_msgs if m.get("unread", False)),
+        "has_new_messages": any(m.get("is_recent", False) for m in all_msgs),
     }
 
 
@@ -160,16 +159,16 @@ def _attrs_upcoming_exams(data: dict[str, Any]) -> dict[str, Any]:
     exams = data.get("upcoming_exams", []) or []
     next_event = exams[0] if exams else None
     return {
-        "zapowiedzi": exams,
-        "liczba_w_3_dni": sum(1 for e in exams if e.get("days_until", 99) <= 3),
-        "liczba_w_7_dni": sum(1 for e in exams if e.get("days_until", 99) <= 7),
-        "liczba_w_14_dni": sum(1 for e in exams if e.get("days_until", 99) <= 14),
-        "liczba_lacznie": len(exams),
-        "najblizsza_data": next_event["date"] if next_event else None,
-        "najblizszy_przedmiot": next_event["subject"] if next_event else None,
-        "najblizszy_tytul": next_event["title"] if next_event else None,
-        "najblizsza_kategoria": next_event["category"] if next_event else None,
-        "najblizsza_dni_do": next_event["days_until"] if next_event else None,
+        "exams": exams,
+        "count_in_3_days": sum(1 for e in exams if e.get("days_until", 99) <= 3),
+        "count_in_7_days": sum(1 for e in exams if e.get("days_until", 99) <= 7),
+        "count_in_14_days": sum(1 for e in exams if e.get("days_until", 99) <= 14),
+        "total_count": len(exams),
+        "next_date": next_event["date"] if next_event else None,
+        "next_subject": next_event["subject"] if next_event else None,
+        "next_title": next_event["title"] if next_event else None,
+        "next_category": next_event["category"] if next_event else None,
+        "next_days_until": next_event["days_until"] if next_event else None,
     }
 
 
@@ -319,7 +318,7 @@ class LibrusSubjectGradesSensor(LibrusBaseEntity, SensorEntity):
         for g in grades:
             for fmt in ("%d.%m.%Y", "%Y-%m-%d"):
                 try:
-                    d = datetime.strptime(g["data"].strip(), fmt).date()
+                    d = datetime.strptime(g["date"].strip(), fmt).date()
                     if latest_date is None or d > latest_date:
                         latest_date = d
                         latest = g
@@ -327,13 +326,12 @@ class LibrusSubjectGradesSensor(LibrusBaseEntity, SensorEntity):
                 except ValueError:
                     continue
 
-        # Polish keys = public API; renamed in EPIC 9 (BREAKING).
         return {
-            "oceny": grades,
-            "lista_ocen": ", ".join(g["ocena"] for g in grades),
-            "srednia": average,
-            "najnowsza_ocena": latest,
-            "sa_nowe_oceny": any(g["jest_nowa"] for g in grades),
+            "grades": grades,
+            "grade_list": ", ".join(g["grade"] for g in grades),
+            "average": average,
+            "latest_grade": latest,
+            "has_new_grades": any(g["is_recent"] for g in grades),
         }
 
 
@@ -366,9 +364,9 @@ class LibrusSubjectAverageSensor(LibrusBaseEntity, SensorEntity):
     def extra_state_attributes(self) -> dict[str, Any]:
         grades = self._data().get("grades_by_subject", {}).get(self._subject, [])
         return {
-            "przedmiot": self._subject,
-            "lista_ocen": ", ".join(g["ocena"] for g in grades),
-            "liczba_ocen": len(grades),
+            "subject": self._subject,
+            "grade_list": ", ".join(g["grade"] for g in grades),
+            "grade_count": len(grades),
         }
 
 

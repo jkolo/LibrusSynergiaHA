@@ -48,9 +48,9 @@ async def test_first_refresh_seeds_seen_sets(hass: HomeAssistant, fake_client):
     """Pierwszy refresh nie wysyla eventow, tylko zapamietuje stan."""
     coordinator = LibrusDataUpdateCoordinator(hass, fake_client)
     fired_events: list[str] = []
-    hass.bus.async_listen_once("librus_apix_nowa_ocena", lambda e: fired_events.append("ocena"))
+    hass.bus.async_listen_once("librus_apix_new_grade", lambda e: fired_events.append("grade"))
     hass.bus.async_listen_once(
-        "librus_apix_nowa_wiadomosc", lambda e: fired_events.append("wiadomosc")
+        "librus_apix_new_message", lambda e: fired_events.append("message")
     )
 
     await coordinator.async_refresh()
@@ -103,7 +103,7 @@ async def test_second_refresh_fires_event_for_new_grade(hass: HomeAssistant, fak
 
     fired = []
     hass.bus.async_listen_once(
-        "librus_apix_nowa_ocena",
+        "librus_apix_new_grade",
         lambda e: fired.append(e.data),
     )
 
@@ -111,8 +111,8 @@ async def test_second_refresh_fires_event_for_new_grade(hass: HomeAssistant, fak
     await hass.async_block_till_done()
 
     assert len(fired) == 1
-    assert fired[0]["przedmiot"] == "Historia"
-    assert fired[0]["ocena"] == "6"
+    assert fired[0]["subject"] == "Historia"
+    assert fired[0]["grade"] == "6"
 
 
 async def test_grades_none_uses_cache(hass: HomeAssistant, fake_client):
