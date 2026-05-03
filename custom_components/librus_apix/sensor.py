@@ -136,6 +136,7 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator):
                 if terminarz_all is not None
                 else None
             )
+            plan_lekcji = await self.client.async_get_timetable_events(weeks_ahead=2)
 
             if grades is None:
                 # Zachowaj poprzednie dane o ocenach jesli dostepne, wiadomosci zaktualizuj jesli OK
@@ -161,6 +162,11 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator):
                         terminarz_all
                         if terminarz_all is not None
                         else prev.get("terminarz", [])
+                    ),
+                    "plan_lekcji": (
+                        plan_lekcji
+                        if plan_lekcji is not None
+                        else prev.get("plan_lekcji", [])
                     ),
                 }
 
@@ -190,6 +196,7 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator):
                 "wiadomosci": wiadomosci,
                 "zapowiedzi": zapowiedzi_list,
                 "terminarz": terminarz_all if terminarz_all is not None else [],
+                "plan_lekcji": plan_lekcji if plan_lekcji is not None else [],
                 "semestr_biezacy": current_sem,
             }
 

@@ -320,9 +320,28 @@ class LibrusApiClient:
                         any(ex in haystack for ex in exclude_keywords)
                         or any(frag in href_lower for frag in exclude_href_fragments)
                     )
-                    is_exam = (
-                        not is_day_off
-                        and any(kw in haystack for kw in exam_keywords)
+                    # Klasyfikacja machine-readable do tagowania w calendar:
+                    # sprawdzian / kartkowka / praca_klasowa / praca_kontrolna /
+                    # wypracowanie_klasowe / test / dzien_wolny / inne
+                    if is_day_off:
+                        event_type = "dzien_wolny"
+                    elif "sprawdzian" in haystack:
+                        event_type = "sprawdzian"
+                    elif "kartkow" in haystack:
+                        event_type = "kartkowka"
+                    elif "praca klasowa" in haystack:
+                        event_type = "praca_klasowa"
+                    elif "praca kontrolna" in haystack:
+                        event_type = "praca_kontrolna"
+                    elif "wypracowanie klasowe" in haystack:
+                        event_type = "wypracowanie_klasowe"
+                    elif "test " in haystack:
+                        event_type = "test"
+                    else:
+                        event_type = "inne"
+                    is_exam = event_type in (
+                        "sprawdzian", "kartkowka", "praca_klasowa",
+                        "praca_kontrolna", "wypracowanie_klasowe", "test",
                     )
 
                     if only_exams and not is_exam:
@@ -341,6 +360,7 @@ class LibrusApiClient:
                         "days_until": days_until,
                         "is_exam": is_exam,
                         "is_day_off": is_day_off,
+                        "event_type": event_type,
                     })
 
                 # Sortuj po dacie
@@ -359,6 +379,88 @@ class LibrusApiClient:
             except Exception as ex:
                 _LOGGER.error(
                     "Failed to get schedule (attempt %d/2): %s\n%s",
+                    attempt + 1, ex, traceback.format_exc(),
+                )
+                self._reset_auth()
+                if attempt == 1:
+                    return None
+
+    async def async_get_timetable_events(self, weeks_ahead: int = 2):
+        """Pobierz plan lekcji z Librusa (timetable).
+
+        Args:
+            weeks_ahead: Ile tygodni w przod pobrac (1 = tylko biezacy).
+
+        Returns:
+            Lista dictow z polami: subject, teacher, classroom, date (YYYY-MM-DD),
+            time_from (HH:MM), time_to (HH:MM), weekday, lesson_number, info.
+            None jesli blad.
+        """
+        from datetime import date as _date, datetime as _dt, timedelta
+
+        for attempt in range(2):
+            try:
+                if not self._client or not self._token:
+                    if not await self.async_authenticate():
+                        return None
+                client = self._client
+
+                from librus_apix.timetable import get_timetable
+
+                loop = asyncio.get_running_loop()
+                today = _date.today()
+                # Najblizszy poniedzialek (lub dzisiaj jesli to poniedzialek)
+                monday = today - timedelta(days=today.weekday())
+
+                lessons = []
+                for week_offset in range(weeks_ahead):
+                    target_monday = monday + timedelta(weeks=week_offset)
+                    monday_dt = _dt.combine(target_monday, _dt.min.time())
+                    try:
+                        week = await loop.run_in_executor(
+                            None, get_timetable, client, monday_dt
+                        )
+                    except Exception as ex:
+                        _LOGGER.debug(
+                            "Timetable fetch failed for %s: %s", target_monday, ex
+                        )
+                        continue
+                    # week to List[List[Period]] - lista dni, kazdy dzien lista lekcji
+                    for day_periods in week:
+                        for period in day_periods:
+                            try:
+                                # Filtruj okienka (subject pusty)
+                                if not period.subject:
+                                    continue
+                                lessons.append({
+                                    "subject": period.subject,
+                                    "teacher_and_classroom": period.teacher_and_classroom or "",
+                                    "date": period.date or "",
+                                    "time_from": period.date_from or "",
+                                    "time_to": period.date_to or "",
+                                    "weekday": period.weekday or "",
+                                    "lesson_number": period.number,
+                                    "info": dict(period.info) if period.info else {},
+                                })
+                            except AttributeError:
+                                continue
+
+                # Sortuj po dacie + godzinie
+                lessons.sort(key=lambda l: (l["date"], l.get("time_from") or ""))
+                return lessons
+
+            except TokenError as ex:
+                _LOGGER.warning(
+                    "Token expired fetching timetable (attempt %d/2), re-authenticating...",
+                    attempt + 1,
+                )
+                self._reset_auth()
+                if attempt == 1:
+                    _LOGGER.error("Failed to get timetable after re-authentication.")
+                    return None
+            except Exception as ex:
+                _LOGGER.error(
+                    "Failed to get timetable (attempt %d/2): %s\n%s",
                     attempt + 1, ex, traceback.format_exc(),
                 )
                 self._reset_auth()
