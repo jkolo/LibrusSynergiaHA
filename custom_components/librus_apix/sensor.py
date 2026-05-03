@@ -14,14 +14,13 @@ from homeassistant.components.sensor import (
     SensorStateClass,
 )
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.typing import StateType
-from homeassistant.helpers.update_coordinator import CoordinatorEntity, DataUpdateCoordinator
 from homeassistant.util import slugify
 
-from .const import DOMAIN
 from .coordinator import LibrusDataUpdateCoordinator
+from .entity import LibrusBaseEntity
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -49,21 +48,6 @@ def _srednia_ocen(oceny: list[dict]) -> float | None:
         except (ValueError, IndexError):
             continue
     return round(sum(wartosci) / len(wartosci), 2) if wartosci else None
-
-
-def _device_info(
-    coordinator: DataUpdateCoordinator, config_entry: ConfigEntry
-) -> dict[str, Any]:
-    """Zwroc informacje o urzadzeniu (wspolne dla wszystkich encji)."""
-    data = coordinator.data or {}
-    student_info = data.get("student_info")
-    name = student_info.name if student_info else "Librus"
-    return {
-        "identifiers": {(DOMAIN, config_entry.entry_id)},
-        "name": f"Librus - {name}",
-        "manufacturer": "Librus",
-        "model": "Synergia",
-    }
 
 
 # ---------------------------------------------------------------------------
@@ -253,10 +237,9 @@ SENSORS: tuple[LibrusSensorEntityDescription, ...] = (
 # ---------------------------------------------------------------------------
 
 
-class LibrusSensor(CoordinatorEntity[LibrusDataUpdateCoordinator], SensorEntity):
+class LibrusSensor(LibrusBaseEntity, SensorEntity):
     """Generic sensor driven by a LibrusSensorEntityDescription."""
 
-    _attr_has_entity_name = True
     entity_description: LibrusSensorEntityDescription
 
     def __init__(
@@ -266,35 +249,27 @@ class LibrusSensor(CoordinatorEntity[LibrusDataUpdateCoordinator], SensorEntity)
         description: LibrusSensorEntityDescription,
     ) -> None:
         """Initialize the sensor from its description."""
-        super().__init__(coordinator)
+        super().__init__(coordinator, config_entry)
         self.entity_description = description
-        self._config_entry = config_entry
         # Zachowujemy historyczny format unique_id zeby nie zlamac
         # istniejacych instalacji (entity registry mapping).
         self._attr_unique_id = f"{config_entry.entry_id}_{description.key}"
 
     @property
-    def device_info(self) -> dict[str, Any]:
-        return _device_info(self.coordinator, self._config_entry)
-
-    @property
     def native_value(self) -> StateType:
-        return self.entity_description.value_fn(self.coordinator.data or {})
+        return self.entity_description.value_fn(self._data())
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         attrs_fn = self.entity_description.attrs_fn
         if attrs_fn is None:
             return {}
-        return attrs_fn(self.coordinator.data or {})
+        return attrs_fn(self._data())
 
 
-class LibrusPrzedmiotSensor(
-    CoordinatorEntity[LibrusDataUpdateCoordinator], SensorEntity
-):
+class LibrusPrzedmiotSensor(LibrusBaseEntity, SensorEntity):
     """Czujnik z ocenami dla konkretnego przedmiotu."""
 
-    _attr_has_entity_name = True
     _attr_icon = "mdi:book-open-variant"
 
     def __init__(
@@ -304,32 +279,23 @@ class LibrusPrzedmiotSensor(
         config_entry: ConfigEntry,
     ) -> None:
         """Inicjalizacja."""
-        super().__init__(coordinator)
-        self._config_entry = config_entry
+        super().__init__(coordinator, config_entry)
         self._subject = subject
         safe_name = slugify(subject)
         self._attr_name = subject
         self._attr_unique_id = f"{config_entry.entry_id}_przedmiot_{safe_name}"
 
     @property
-    def device_info(self) -> dict[str, Any]:
-        return _device_info(self.coordinator, self._config_entry)
-
-    @property
     def native_value(self) -> int | None:
         # State HA jest ograniczony do 255 znakow - przy duzej liczbie ocen
         # zlaczona lista by sie ucinala. Trzymamy liczbe ocen jako state,
         # pelna lista jest w atrybucie "lista_ocen".
-        oceny = (self.coordinator.data or {}).get("oceny_wg_przedmiotu", {}).get(
-            self._subject, []
-        )
+        oceny = self._data().get("oceny_wg_przedmiotu", {}).get(self._subject, [])
         return len(oceny) if oceny else None
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
-        oceny = (self.coordinator.data or {}).get("oceny_wg_przedmiotu", {}).get(
-            self._subject, []
-        )
+        oceny = self._data().get("oceny_wg_przedmiotu", {}).get(self._subject, [])
         if not oceny:
             return {}
 
@@ -358,12 +324,9 @@ class LibrusPrzedmiotSensor(
         }
 
 
-class LibrusSredniaPrzedmiotuSensor(
-    CoordinatorEntity[LibrusDataUpdateCoordinator], SensorEntity
-):
+class LibrusSredniaPrzedmiotuSensor(LibrusBaseEntity, SensorEntity):
     """Czujnik ze srednia ocen dla konkretnego przedmiotu (do wykresu)."""
 
-    _attr_has_entity_name = True
     _attr_icon = "mdi:chart-bar"
     _attr_state_class = SensorStateClass.MEASUREMENT
 
@@ -374,29 +337,20 @@ class LibrusSredniaPrzedmiotuSensor(
         config_entry: ConfigEntry,
     ) -> None:
         """Inicjalizacja."""
-        super().__init__(coordinator)
-        self._config_entry = config_entry
+        super().__init__(coordinator, config_entry)
         self._subject = subject
         safe_name = slugify(subject)
         self._attr_name = f"Srednia {subject}"
         self._attr_unique_id = f"{config_entry.entry_id}_srednia_{safe_name}"
 
     @property
-    def device_info(self) -> dict[str, Any]:
-        return _device_info(self.coordinator, self._config_entry)
-
-    @property
     def native_value(self) -> float | None:
-        oceny = (self.coordinator.data or {}).get("oceny_wg_przedmiotu", {}).get(
-            self._subject, []
-        )
+        oceny = self._data().get("oceny_wg_przedmiotu", {}).get(self._subject, [])
         return _srednia_ocen(oceny)
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
-        oceny = (self.coordinator.data or {}).get("oceny_wg_przedmiotu", {}).get(
-            self._subject, []
-        )
+        oceny = self._data().get("oceny_wg_przedmiotu", {}).get(self._subject, [])
         return {
             "przedmiot": self._subject,
             "lista_ocen": ", ".join(g["ocena"] for g in oceny),
@@ -417,18 +371,37 @@ async def async_setup_entry(
     """Konfiguracja platformy czujnikow Librus APIX."""
     coordinator: LibrusDataUpdateCoordinator = config_entry.runtime_data.coordinator
 
-    entities: list[SensorEntity] = [
+    static_entities: list[SensorEntity] = [
         LibrusSensor(coordinator, config_entry, description)
         for description in SENSORS
     ]
+    async_add_entities(static_entities)
 
-    # Czujniki per przedmiot — na podstawie pierwszego pobrania danych.
-    # Dynamic-device discovery (przedmiot pojawiajacy sie mid-semester)
-    # jest planowany w EPIC 5b.
-    for subject in coordinator.data.get("oceny_wg_przedmiotu", {}).keys():
-        entities.append(LibrusPrzedmiotSensor(coordinator, subject, config_entry))
-        entities.append(
-            LibrusSredniaPrzedmiotuSensor(coordinator, subject, config_entry)
+    # Czujniki per przedmiot — sledzimy pojawiajace sie nowe przedmioty.
+    # Pierwszy refresh juz sie wykonal, wiec stala lista przedmiotow jest
+    # natychmiast dostepna; coordinator listener wylapuje nowe wpisy
+    # pojawiajace sie mid-semester (rule Gold dynamic-devices).
+    known_subjects: set[str] = set()
+
+    @callback
+    def _add_subject_sensors() -> None:
+        current_subjects = set(
+            (coordinator.data or {}).get("oceny_wg_przedmiotu", {}).keys()
         )
+        new_subjects = current_subjects - known_subjects
+        if not new_subjects:
+            return
+        known_subjects.update(new_subjects)
+        new_entities: list[SensorEntity] = []
+        for subject in new_subjects:
+            new_entities.append(
+                LibrusPrzedmiotSensor(coordinator, subject, config_entry)
+            )
+            new_entities.append(
+                LibrusSredniaPrzedmiotuSensor(coordinator, subject, config_entry)
+            )
+        async_add_entities(new_entities)
 
-    async_add_entities(entities)
+    # Pierwsze dodanie + listener na kazdy kolejny refresh.
+    _add_subject_sensors()
+    config_entry.async_on_unload(coordinator.async_add_listener(_add_subject_sensors))

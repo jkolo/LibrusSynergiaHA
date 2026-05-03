@@ -16,10 +16,9 @@ from homeassistant.components.calendar import CalendarEntity, CalendarEvent
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.util import dt as dt_util
 
-from .const import DOMAIN
+from .entity import LibrusBaseEntity
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -50,19 +49,6 @@ async def async_setup_entry(
         LibrusTerminarzCalendar(coordinator, config_entry),
         LibrusPlanLekcjiCalendar(coordinator, config_entry),
     ])
-
-
-def _device_info(coordinator, config_entry: ConfigEntry) -> dict[str, Any]:
-    """Zwroc informacje o urzadzeniu (wspolny z sensor.py)."""
-    data = coordinator.data or {}
-    student_info = data.get("student_info")
-    name = student_info.name if student_info else "Librus"
-    return {
-        "identifiers": {(DOMAIN, config_entry.entry_id)},
-        "name": f"Librus - {name}",
-        "manufacturer": "Librus",
-        "model": "Synergia",
-    }
 
 
 def _parse_hour_range(hour_str: str) -> tuple[time | None, time | None]:
@@ -186,18 +172,8 @@ def _lekcja_to_calendar_event(period: dict) -> CalendarEvent | None:
     )
 
 
-class LibrusBaseCalendar(CoordinatorEntity, CalendarEntity):
+class LibrusBaseCalendar(LibrusBaseEntity, CalendarEntity):
     """Bazowa klasa kalendarza Librus."""
-
-    _attr_has_entity_name = True
-
-    def __init__(self, coordinator, config_entry: ConfigEntry) -> None:
-        super().__init__(coordinator)
-        self._config_entry = config_entry
-
-    @property
-    def device_info(self) -> dict[str, Any]:
-        return _device_info(self.coordinator, self._config_entry)
 
     def _convert(self, raw: dict) -> CalendarEvent | None:
         raise NotImplementedError
