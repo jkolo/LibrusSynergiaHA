@@ -33,7 +33,7 @@ T = TypeVar("T")
 
 _LOGGER = logging.getLogger(__name__)
 
-PLATFORMS = ["sensor", "calendar"]
+PLATFORMS = ["sensor", "calendar", "event"]
 
 
 @dataclass

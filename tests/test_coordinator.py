@@ -57,25 +57,30 @@ def fake_client(mock_student_info):
 async def test_first_refresh_seeds_seen_sets(hass: HomeAssistant, fake_client):
     """Pierwszy refresh nie wysyla eventow, tylko zapamietuje stan."""
     coordinator = LibrusDataUpdateCoordinator(hass, fake_client)
-    fired_events: list[str] = []
-    hass.bus.async_listen_once("librus_apix_new_grade", lambda e: fired_events.append("grade"))
-    hass.bus.async_listen_once(
-        "librus_apix_new_message", lambda e: fired_events.append("message")
-    )
 
     await coordinator.async_refresh()
     await hass.async_block_till_done()
 
-    # Pierwszy run = seed only, nic nie poszlo na bus.
-    assert fired_events == []
+    # Pierwszy run = seed only, kolejka pending events pusta.
+    assert coordinator.consume_pending_event("new_grade") is None
+    assert coordinator.consume_pending_event("new_message") is None
+    assert coordinator.consume_pending_event("new_exam") is None
+    assert coordinator.consume_pending_event("new_announcement") is None
+    assert coordinator.consume_pending_event("new_absence") is None
     # Ale dane sa: 2 oceny, 2 przedmioty.
     assert len(coordinator.data["grades"]) == 2
     assert "Matematyka" in coordinator.data["grades_by_subject"]
     assert "Polski" in coordinator.data["grades_by_subject"]
 
 
-async def test_second_refresh_fires_event_for_new_grade(hass: HomeAssistant, fake_client):
-    """Druga aktualizacja z nowa ocena emituje librus_apix_nowa_ocena."""
+async def test_second_refresh_enqueues_pending_event_for_new_grade(
+    hass: HomeAssistant, fake_client
+):
+    """Druga aktualizacja z nowa ocena wstawia payload do _pending_events.
+
+    BREAKING (v3.0): bus eventy `librus_apix_*` znikneły. Nowa ocena trafia
+    do kolejki `_pending_events["new_grade"]`, ktora konsumuje event entity.
+    """
     coordinator = LibrusDataUpdateCoordinator(hass, fake_client)
     await coordinator.async_refresh()
     await hass.async_block_till_done()
@@ -111,18 +116,22 @@ async def test_second_refresh_fires_event_for_new_grade(hass: HomeAssistant, fak
         },
     ])
 
-    fired = []
+    # Bus event NIE powinien firowac (clean break).
+    bus_fired: list = []
     hass.bus.async_listen_once(
-        "librus_apix_new_grade",
-        lambda e: fired.append(e.data),
+        "librus_apix_new_grade", lambda e: bus_fired.append(e.data)
     )
 
     await coordinator.async_refresh()
     await hass.async_block_till_done()
 
-    assert len(fired) == 1
-    assert fired[0]["subject"] == "Historia"
-    assert fired[0]["grade"] == "6"
+    assert bus_fired == []  # legacy bus event removed
+    payload = coordinator.consume_pending_event("new_grade")
+    assert payload is not None
+    assert payload["subject"] == "Historia"
+    assert payload["grade"] == "6"
+    # Drugi consume zwraca None — kolejka jednorazowego użytku.
+    assert coordinator.consume_pending_event("new_grade") is None
 
 
 async def test_grades_none_uses_cache(hass: HomeAssistant, fake_client):
