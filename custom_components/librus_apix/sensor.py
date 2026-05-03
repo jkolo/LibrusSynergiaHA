@@ -14,6 +14,7 @@ from homeassistant.components.sensor import (
     SensorStateClass,
 )
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.typing import StateType
@@ -194,6 +195,8 @@ SENSORS: tuple[LibrusSensorEntityDescription, ...] = (
         key="uczen",
         translation_key="student_info",
         icon="mdi:account-school",
+        # Diagnostic — student name/class is metadata, not the primary value.
+        entity_category=EntityCategory.DIAGNOSTIC,
         value_fn=_val_uczen,
         attrs_fn=_attrs_uczen,
     ),
@@ -201,6 +204,8 @@ SENSORS: tuple[LibrusSensorEntityDescription, ...] = (
         key="szczesliwy_numerek",
         translation_key="lucky_number",
         icon="mdi:numeric",
+        # Diagnostic — daily fun number, not actionable telemetry.
+        entity_category=EntityCategory.DIAGNOSTIC,
         value_fn=_val_lucky,
     ),
     LibrusSensorEntityDescription(
@@ -275,6 +280,9 @@ class LibrusSubjectGradesSensor(LibrusBaseEntity, SensorEntity):
     """Sensor exposing grades for a single subject."""
 
     _attr_icon = "mdi:book-open-variant"
+    # Per-subject sensors quickly become noise (often 15+ subjects per child).
+    # Disabled by default — users opt-in to subjects they care about.
+    _attr_entity_registry_enabled_default = False
 
     def __init__(
         self,
@@ -334,6 +342,7 @@ class LibrusSubjectAverageSensor(LibrusBaseEntity, SensorEntity):
 
     _attr_icon = "mdi:chart-bar"
     _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_entity_registry_enabled_default = False
 
     def __init__(
         self,
