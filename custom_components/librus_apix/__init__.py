@@ -489,15 +489,23 @@ async def async_setup(hass: HomeAssistant, config: Dict[str, Any]) -> bool:
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Librus APIX from a config entry."""
+    from homeassistant.exceptions import ConfigEntryNotReady
+
     username = entry.data[CONF_USERNAME]
     password = entry.data[CONF_PASSWORD]
 
     client = LibrusApiClient(username, password)
 
-    # Test authentication
+    # Test authentication; gdy Librus jest w maintenance lub niedostepny, rzuc
+    # ConfigEntryNotReady - HA bedzie automatycznie retryowal setup z exponential
+    # backoff zamiast porazki na stale (config_entry "setup_failed" wymaga manualnego
+    # reload). Librus ma okresowe przerwy techniczne raz dziennie, wiec retry jest
+    # kluczowy dla niezawodnosci.
     if not await client.async_authenticate():
-        _LOGGER.error("Failed to authenticate")
-        return False
+        raise ConfigEntryNotReady(
+            f"Nie udalo sie zalogowac do Librus dla {username} (mozliwy maintenance Librus). "
+            "HA wykona retry automatycznie."
+        )
 
     hass.data.setdefault(DOMAIN, {})
     hass.data[DOMAIN][entry.entry_id] = client
