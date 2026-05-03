@@ -19,7 +19,12 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 from homeassistant.util import dt as dt_util
 
 from .const import DOMAIN, SCAN_INTERVAL
-from .humanize import jitter_pause_seconds, next_run_delay, random_endpoint_order
+from .humanize import (
+    is_school_day,
+    jitter_pause_seconds,
+    next_run_delay,
+    random_endpoint_order,
+)
 
 if TYPE_CHECKING:
     from . import LibrusApiClient
@@ -30,10 +35,14 @@ _LOGGER = logging.getLogger(__name__)
 # would otherwise let these grow unbounded over months/years.
 _MAX_SEEN_ITEMS = 500
 
-# Defaults for the human-like scheduler (PR 4). PR 6 makes them user-tunable
+# Defaults for the human-like scheduler. PR 6 makes them user-tunable
 # via OptionsFlow; for now they're hard-coded constants.
 _DEFAULT_BASE_MINUTES = 120.0
 _DEFAULT_JITTER = 0.25
+# Off-school multiplier — extends the base interval on weekends, holidays,
+# breaks, and any other day Librus marks as a day off in the schedule.
+# 6 × 120 min = 12 h; in practice a refresh per breakfast and per dinner.
+_DEFAULT_OFF_SCHOOL_MULTIPLIER = 6.0
 # Sentinel update_interval — DataUpdateCoordinator requires one but we drive
 # refreshes ourselves via async_call_later. Picked far enough in the future
 # that the built-in poll never fires before our scheduler does.
@@ -176,17 +185,22 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._unsub_next()
             self._unsub_next = None
 
+        now = dt_util.now()
+        schedule = (self.data or {}).get("schedule") or []
+        school_day_now = is_school_day(now.date(), schedule)
         delay = next_run_delay(
             self._rng,
             base_minutes=_DEFAULT_BASE_MINUTES,
             jitter=_DEFAULT_JITTER,
             quiet_hours=None,
-            # PR 5 will plug in is_school_day(coordinator.data["schedule"]).
-            is_school_day_now=True,
-            off_school_multiplier=1.0,
-            now=dt_util.now(),
+            is_school_day_now=school_day_now,
+            off_school_multiplier=_DEFAULT_OFF_SCHOOL_MULTIPLIER,
+            now=now,
         )
-        _LOGGER.debug("Next Librus refresh scheduled in %.1f s", delay)
+        _LOGGER.debug(
+            "Next Librus refresh scheduled in %.1f s (school_day=%s)",
+            delay, school_day_now,
+        )
         self._unsub_next = async_call_later(
             self.hass, delay, self._scheduled_refresh
         )
