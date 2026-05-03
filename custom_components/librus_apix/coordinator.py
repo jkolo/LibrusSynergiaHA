@@ -23,16 +23,18 @@ _LOGGER = logging.getLogger(__name__)
 # would otherwise let these grow unbounded over months/years.
 _MAX_SEEN_ITEMS = 500
 
+# Public event names — Polish historical names kept for user automations.
+# Renamed in EPIC 9 (BREAKING) to librus_apix_new_*.
 EVENT_NOWA_WIADOMOSC = f"{DOMAIN}_nowa_wiadomosc"
 EVENT_NOWA_OCENA = f"{DOMAIN}_nowa_ocena"
 EVENT_NOWA_ZAPOWIEDZ = f"{DOMAIN}_nowa_zapowiedz"
 
 
-def _jest_nowa(date_str: str) -> bool:
-    """Sprawdz czy data miesci sie w ostatnich 24 godzinach (dzis lub wczoraj)."""
+def _is_recent(date_str: str) -> bool:
+    """Return True if `date_str` parses to today or yesterday."""
     if not date_str:
         return False
-    wczoraj = date.today() - timedelta(days=1)
+    yesterday = date.today() - timedelta(days=1)
     for fmt in (
         "%d.%m.%Y %H:%M:%S",
         "%d.%m.%Y %H:%M",
@@ -43,7 +45,7 @@ def _jest_nowa(date_str: str) -> bool:
     ):
         try:
             d = datetime.strptime(date_str.strip(), fmt).date()
-            return d >= wczoraj
+            return d >= yesterday
         except ValueError:
             continue
     return False
@@ -60,7 +62,7 @@ def _add_lru(items: OrderedDict[Any, None], key: Any) -> None:
 
 
 class LibrusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
-    """Klasa zarzadzajaca pobieraniem danych z Librus."""
+    """Coordinator fetching student data from Librus."""
 
     config_entry: ConfigEntry
 
@@ -70,11 +72,11 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         client: LibrusApiClient,
         config_entry: ConfigEntry | None = None,
     ) -> None:
-        """Inicjalizacja koordynatora."""
+        """Initialize the coordinator."""
         self.client = client
         self._seen_message_hrefs: OrderedDict[str, None] = OrderedDict()
         self._seen_grade_ids: OrderedDict[tuple, None] = OrderedDict()
-        self._seen_zapowiedzi_ids: OrderedDict[tuple, None] = OrderedDict()
+        self._seen_exam_ids: OrderedDict[tuple, None] = OrderedDict()
         self._first_run: bool = True
         super().__init__(
             hass,
@@ -88,143 +90,145 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     async def _async_setup(self) -> None:
         """One-time initialization: first login.
 
-        Called automatically by HA on the first refresh. If Librus is in
-        maintenance, raises ConfigEntryNotReady so HA retries with backoff.
+        Called by HA on the first refresh. If Librus is in maintenance,
+        ConfigEntryNotReady triggers HA's exponential-backoff retry.
         """
         if not await self.client.async_authenticate():
             raise ConfigEntryNotReady(
-                f"Nie udalo sie zalogowac do Librus dla {self.client.username} "
-                "(mozliwy maintenance Librus). HA wykona retry automatycznie."
+                f"Failed to log in to Librus for {self.client.username} "
+                "(possible Librus maintenance). HA will retry automatically."
             )
 
     async def _async_update_data(self) -> dict[str, Any]:
-        """Pobierz aktualne dane z API Librus."""
+        """Fetch fresh data from the Librus API."""
         from . import LibrusAuthError  # local import to avoid circular at module import
 
-        current_sem = 1 if date.today().month >= 9 else 2
+        current_semester = 1 if date.today().month >= 9 else 2
 
         try:
             student_info = await self.client.async_get_student_information()
             grades = await self.client.async_get_grades()
             messages = await self.client.async_get_messages(count=10)
-            # Pobierz pelen terminarz (sprawdziany + dni wolne + inne) raz; sensor.zapowiedzi
-            # uzywa tylko exam events, calendar.terminarz uzywa wszystkiego.
-            terminarz_all = await self.client.async_get_schedule_events(
+            # Fetch the full schedule once: sensor.zapowiedzi uses only exam
+            # events, calendar.terminarz uses everything.
+            schedule_all = await self.client.async_get_schedule_events(
                 months_ahead=2, only_exams=False
             )
-            zapowiedzi = (
-                [e for e in terminarz_all if e.get("is_exam")]
-                if terminarz_all is not None
+            upcoming_exams = (
+                [e for e in schedule_all if e.get("is_exam")]
+                if schedule_all is not None
                 else None
             )
-            plan_lekcji = await self.client.async_get_timetable_events(weeks_ahead=4)
+            timetable = await self.client.async_get_timetable_events(weeks_ahead=4)
 
             if grades is None:
-                # Zachowaj poprzednie dane o ocenach jesli dostepne, wiadomosci zaktualizuj jesli OK
+                # Fall back to cached grades if available; refresh other slots
+                # if their fetches succeeded.
                 prev = self.data or {}
-                if not prev.get("oceny"):
-                    raise UpdateFailed("Nie udalo sie pobrac ocen i brak danych w cache")
+                if not prev.get("grades"):
+                    raise UpdateFailed("Failed to fetch grades and no cache available")
                 _LOGGER.warning(
-                    "Nie udalo sie pobrac ocen - uzywam poprzednich danych z cache"
+                    "Failed to fetch grades — using cached values"
                 )
                 return {
                     "student_info": student_info or prev.get("student_info"),
-                    "oceny": prev.get("oceny", []),
-                    "oceny_wg_przedmiotu": prev.get("oceny_wg_przedmiotu", {}),
-                    "wiadomosci": (
-                        self._build_wiadomosci(messages)
+                    "grades": prev.get("grades", []),
+                    "grades_by_subject": prev.get("grades_by_subject", {}),
+                    "messages": (
+                        self._annotate_messages(messages)
                         if messages is not None
-                        else prev.get("wiadomosci", [])
+                        else prev.get("messages", [])
                     ),
-                    "zapowiedzi": (
-                        zapowiedzi
-                        if zapowiedzi is not None
-                        else prev.get("zapowiedzi", [])
+                    "upcoming_exams": (
+                        upcoming_exams
+                        if upcoming_exams is not None
+                        else prev.get("upcoming_exams", [])
                     ),
-                    "terminarz": (
-                        terminarz_all
-                        if terminarz_all is not None
-                        else prev.get("terminarz", [])
+                    "schedule": (
+                        schedule_all
+                        if schedule_all is not None
+                        else prev.get("schedule", [])
                     ),
-                    "plan_lekcji": (
-                        plan_lekcji
-                        if plan_lekcji is not None
-                        else prev.get("plan_lekcji", [])
+                    "timetable": (
+                        timetable
+                        if timetable is not None
+                        else prev.get("timetable", [])
                     ),
+                    "current_semester": current_semester,
                 }
 
-            # Grupuj oceny wg przedmiotu i oznacz nowe
-            oceny_wg_przedmiotu: dict[str, list[dict]] = {}
+            # Group grades by subject and tag fresh ones.
+            grades_by_subject: dict[str, list[dict]] = {}
             for grade in grades:
                 subject = grade["subject"]
-                if subject not in oceny_wg_przedmiotu:
-                    oceny_wg_przedmiotu[subject] = []
-                oceny_wg_przedmiotu[subject].append({
+                if subject not in grades_by_subject:
+                    grades_by_subject[subject] = []
+                grades_by_subject[subject].append({
                     "ocena": grade["grade"],
                     "data": grade["date"],
                     "kategoria": grade["category"],
                     "nauczyciel": grade["teacher"],
                     "semestr": grade.get("semester"),
-                    "jest_nowa": _jest_nowa(grade["date"]),
+                    "jest_nowa": _is_recent(grade["date"]),
                 })
 
-            wiadomosci = self._build_wiadomosci(messages)
-
-            zapowiedzi_list = zapowiedzi if zapowiedzi is not None else []
+            annotated_messages = self._annotate_messages(messages)
+            exams_list = upcoming_exams if upcoming_exams is not None else []
 
             result = {
                 "student_info": student_info,
-                "oceny": grades,
-                "oceny_wg_przedmiotu": oceny_wg_przedmiotu,
-                "wiadomosci": wiadomosci,
-                "zapowiedzi": zapowiedzi_list,
-                "terminarz": terminarz_all if terminarz_all is not None else [],
-                "plan_lekcji": plan_lekcji if plan_lekcji is not None else [],
-                "semestr_biezacy": current_sem,
+                "grades": grades,
+                "grades_by_subject": grades_by_subject,
+                "messages": annotated_messages,
+                "upcoming_exams": exams_list,
+                "schedule": schedule_all if schedule_all is not None else [],
+                "timetable": timetable if timetable is not None else [],
+                "current_semester": current_semester,
             }
 
-            # Pierwsze pobranie - tylko zapamietaj stan, nie wysylaj powiadomien
+            # First refresh: only seed seen-sets, do not fire events to avoid
+            # spurious notifications for everything that already exists.
             if self._first_run:
                 self._first_run = False
-                for msg in wiadomosci:
+                for msg in annotated_messages:
                     _add_lru(self._seen_message_hrefs, msg["href"])
                 for grade in grades:
                     _add_lru(
                         self._seen_grade_ids,
                         (grade["subject"], grade["date"], grade["grade"]),
                     )
-                for zap in zapowiedzi_list:
+                for exam in exams_list:
                     _add_lru(
-                        self._seen_zapowiedzi_ids,
-                        (zap["date"], zap["subject"], zap["title"]),
+                        self._seen_exam_ids,
+                        (exam["date"], exam["subject"], exam["title"]),
                     )
             else:
-                self._fire_events(wiadomosci, grades, zapowiedzi_list)
+                self._fire_events(annotated_messages, grades, exams_list)
 
             return result
 
         except LibrusAuthError as err:
-            # Hasło prawdopodobnie zmienione w Librusie — startujemy reauth flow.
+            # Password likely changed in Librus — start reauth flow.
             raise ConfigEntryAuthFailed(
                 "Authentication permanently failed — please re-enter password."
             ) from err
         except UpdateFailed:
             raise
         except Exception as err:
-            raise UpdateFailed(f"Blad komunikacji z API: {err}") from err
+            raise UpdateFailed(f"Librus API error: {err}") from err
 
     def _fire_events(
         self,
         messages: list[dict],
         grades: list[dict],
-        zapowiedzi: list[dict] | None = None,
+        upcoming_exams: list[dict] | None = None,
     ) -> None:
-        """Wyslij zdarzenia HA dla nowych wiadomosci, ocen i zapowiedzi."""
+        """Emit HA bus events for newly observed messages/grades/exams."""
         for msg in messages:
             href = msg.get("href", "")
             if href and href not in self._seen_message_hrefs:
                 _add_lru(self._seen_message_hrefs, href)
-                _LOGGER.debug("Nowa wiadomosc: %s", msg.get("title"))
+                _LOGGER.debug("New message: %s", msg.get("title"))
                 self.hass.bus.fire(
                     EVENT_NOWA_WIADOMOSC,
                     {
@@ -239,7 +243,7 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             grade_id = (grade["subject"], grade["date"], grade["grade"])
             if grade_id not in self._seen_grade_ids:
                 _add_lru(self._seen_grade_ids, grade_id)
-                _LOGGER.debug("Nowa ocena: %s %s", grade["subject"], grade["grade"])
+                _LOGGER.debug("New grade: %s %s", grade["subject"], grade["grade"])
                 self.hass.bus.fire(
                     EVENT_NOWA_OCENA,
                     {
@@ -251,32 +255,32 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     },
                 )
 
-        for zap in zapowiedzi or []:
-            zap_id = (zap["date"], zap["subject"], zap["title"])
-            if zap_id not in self._seen_zapowiedzi_ids:
-                _add_lru(self._seen_zapowiedzi_ids, zap_id)
+        for exam in upcoming_exams or []:
+            exam_id = (exam["date"], exam["subject"], exam["title"])
+            if exam_id not in self._seen_exam_ids:
+                _add_lru(self._seen_exam_ids, exam_id)
                 _LOGGER.debug(
-                    "Nowa zapowiedz: %s %s (%s)",
-                    zap.get("subject"),
-                    zap.get("title"),
-                    zap.get("date"),
+                    "New exam announcement: %s %s (%s)",
+                    exam.get("subject"),
+                    exam.get("title"),
+                    exam.get("date"),
                 )
                 self.hass.bus.fire(
                     EVENT_NOWA_ZAPOWIEDZ,
                     {
-                        "tytul": zap.get("title", ""),
-                        "przedmiot": zap.get("subject", ""),
-                        "kategoria": zap.get("category", ""),
-                        "data": zap.get("date", ""),
-                        "godzina": zap.get("hour", ""),
-                        "dni_do": zap.get("days_until", 0),
+                        "tytul": exam.get("title", ""),
+                        "przedmiot": exam.get("subject", ""),
+                        "kategoria": exam.get("category", ""),
+                        "data": exam.get("date", ""),
+                        "godzina": exam.get("hour", ""),
+                        "dni_do": exam.get("days_until", 0),
                     },
                 )
 
-    def _build_wiadomosci(self, messages: list[dict] | None) -> list[dict]:
-        """Oznacz nowe wiadomosci i zwroc liste."""
+    def _annotate_messages(self, messages: list[dict] | None) -> list[dict]:
+        """Mark fresh messages and return the list (in-place tagged copy)."""
         result = []
         for msg in messages or []:
-            msg["jest_nowa"] = _jest_nowa(msg.get("date", ""))
+            msg["jest_nowa"] = _is_recent(msg.get("date", ""))
             result.append(msg)
         return result

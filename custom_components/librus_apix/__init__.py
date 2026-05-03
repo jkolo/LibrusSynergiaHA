@@ -304,28 +304,27 @@ class LibrusApiClient:
                     any(ex in haystack for ex in exclude_keywords)
                     or any(frag in href_lower for frag in exclude_href_fragments)
                 )
-                # Klasyfikacja machine-readable do tagowania w calendar:
-                # sprawdzian / kartkowka / praca_klasowa / praca_kontrolna /
-                # wypracowanie_klasowe / test / dzien_wolny / inne
+                # Machine-readable classification for calendar tagging.
+                # Values are English codes; calendar.py maps them to Polish
+                # display tags (SPRAWDZIAN, KARTKOWKA, ...) in summaries.
                 if is_day_off:
-                    event_type = "dzien_wolny"
+                    event_type = "day_off"
                 elif "sprawdzian" in haystack:
-                    event_type = "sprawdzian"
+                    event_type = "exam"
                 elif "kartkow" in haystack:
-                    event_type = "kartkowka"
+                    event_type = "quiz"
                 elif "praca klasowa" in haystack:
-                    event_type = "praca_klasowa"
+                    event_type = "class_test"
                 elif "praca kontrolna" in haystack:
-                    event_type = "praca_kontrolna"
+                    event_type = "assessment"
                 elif "wypracowanie klasowe" in haystack:
-                    event_type = "wypracowanie_klasowe"
+                    event_type = "essay_test"
                 elif "test " in haystack:
                     event_type = "test"
                 else:
-                    event_type = "inne"
+                    event_type = "other"
                 is_exam = event_type in (
-                    "sprawdzian", "kartkowka", "praca_klasowa",
-                    "praca_kontrolna", "wypracowanie_klasowe", "test",
+                    "exam", "quiz", "class_test", "assessment", "essay_test", "test",
                 )
 
                 if only_exams and not is_exam:

@@ -7,31 +7,31 @@ from unittest.mock import patch
 
 import pytest
 
-from custom_components.librus_apix.coordinator import _jest_nowa, _add_lru, _MAX_SEEN_ITEMS
-from custom_components.librus_apix.sensor import _srednia_ocen
+from custom_components.librus_apix.coordinator import _is_recent, _add_lru, _MAX_SEEN_ITEMS
+from custom_components.librus_apix.sensor import _grade_average
 
 
-class TestSredniaOcen:
-    """_srednia_ocen — averaging Polish-format grades."""
+class TestGradeAverage:
+    """_grade_average — averaging Polish-format grades."""
 
     def test_empty_returns_none(self):
-        assert _srednia_ocen([]) is None
+        assert _grade_average([]) is None
 
     def test_only_invalid_returns_none(self):
-        assert _srednia_ocen([{"ocena": "X"}, {"ocena": ""}]) is None
+        assert _grade_average([{"ocena": "X"}, {"ocena": ""}]) is None
 
     def test_single_grade(self):
-        assert _srednia_ocen([{"ocena": "4"}]) == 4.0
+        assert _grade_average([{"ocena": "4"}]) == 4.0
 
     def test_plus_adds_half(self):
-        assert _srednia_ocen([{"ocena": "4+"}]) == 4.5
+        assert _grade_average([{"ocena": "4+"}]) == 4.5
 
     def test_minus_subtracts_quarter(self):
-        assert _srednia_ocen([{"ocena": "4-"}]) == 3.75
+        assert _grade_average([{"ocena": "4-"}]) == 3.75
 
     def test_average_of_mixed(self):
         # (5 + 3 + 4.5) / 3 = 4.166... → 4.17
-        assert _srednia_ocen([
+        assert _grade_average([
             {"ocena": "5"},
             {"ocena": "3"},
             {"ocena": "4+"},
@@ -39,40 +39,40 @@ class TestSredniaOcen:
 
     def test_invalid_skipped_not_failed(self):
         # 5 valid + 1 invalid → average from the valid one only
-        assert _srednia_ocen([
+        assert _grade_average([
             {"ocena": "5"},
             {"ocena": "abc"},
         ]) == 5.0
 
 
-class TestJestNowa:
-    """_jest_nowa — date freshness within last 24h window."""
+class TestIsRecent:
+    """_is_recent — date freshness within last 24h window."""
 
     def test_empty_string_false(self):
-        assert _jest_nowa("") is False
+        assert _is_recent("") is False
 
     def test_unparseable_false(self):
-        assert _jest_nowa("not a date") is False
+        assert _is_recent("not a date") is False
 
     def test_today_polish_format(self):
         today = date.today().strftime("%d.%m.%Y")
-        assert _jest_nowa(today) is True
+        assert _is_recent(today) is True
 
     def test_yesterday_polish_format(self):
         yesterday = (date.today() - timedelta(days=1)).strftime("%d.%m.%Y")
-        assert _jest_nowa(yesterday) is True
+        assert _is_recent(yesterday) is True
 
     def test_two_days_ago_false(self):
         old = (date.today() - timedelta(days=2)).strftime("%d.%m.%Y")
-        assert _jest_nowa(old) is False
+        assert _is_recent(old) is False
 
     def test_iso_format(self):
         today = date.today().strftime("%Y-%m-%d")
-        assert _jest_nowa(today) is True
+        assert _is_recent(today) is True
 
     def test_with_time(self):
         today = date.today().strftime("%d.%m.%Y 12:30")
-        assert _jest_nowa(today) is True
+        assert _is_recent(today) is True
 
 
 class TestAddLru:

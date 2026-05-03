@@ -59,9 +59,9 @@ async def test_first_refresh_seeds_seen_sets(hass: HomeAssistant, fake_client):
     # Pierwszy run = seed only, nic nie poszlo na bus.
     assert fired_events == []
     # Ale dane sa: 2 oceny, 2 przedmioty.
-    assert len(coordinator.data["oceny"]) == 2
-    assert "Matematyka" in coordinator.data["oceny_wg_przedmiotu"]
-    assert "Polski" in coordinator.data["oceny_wg_przedmiotu"]
+    assert len(coordinator.data["grades"]) == 2
+    assert "Matematyka" in coordinator.data["grades_by_subject"]
+    assert "Polski" in coordinator.data["grades_by_subject"]
 
 
 async def test_second_refresh_fires_event_for_new_grade(hass: HomeAssistant, fake_client):
@@ -128,7 +128,7 @@ async def test_grades_none_uses_cache(hass: HomeAssistant, fake_client):
 
     # Refresh sukces — cache podstawiony.
     assert coordinator.last_update_success is True
-    assert len(coordinator.data["oceny"]) == 2
+    assert len(coordinator.data["grades"]) == 2
 
 
 async def test_first_refresh_fail_then_recovery(hass: HomeAssistant, fake_client):
