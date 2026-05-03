@@ -1,10 +1,14 @@
 """Config flow for Librus APIX integration."""
 
-import logging
-import voluptuous as vol
+from __future__ import annotations
 
+import asyncio
+import logging
+from typing import Any
+
+import voluptuous as vol
 from homeassistant import config_entries
-from homeassistant.const import CONF_USERNAME, CONF_PASSWORD
+from homeassistant.const import CONF_PASSWORD, CONF_USERNAME
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResult
 
@@ -22,25 +26,23 @@ STEP_USER_DATA_SCHEMA = vol.Schema(
 )
 
 
-async def validate_input(hass: HomeAssistant, data: dict):
+async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str, Any]:
     """Validate the user input allows us to connect."""
     username = data[CONF_USERNAME]
     password = data[CONF_PASSWORD]
-    
-    # Test authentication
+
     try:
-        import asyncio
         loop = asyncio.get_running_loop()
         client = await loop.run_in_executor(None, new_client)
         token = await loop.run_in_executor(None, client.get_token, username, password)
-        
+
         if not token:
             raise ValueError("Authentication failed")
-            
+
         return {"title": f"Librus APIX ({username})"}
-    
+
     except Exception as ex:
-        _LOGGER.error("Authentication error: %s", ex)
+        _LOGGER.exception("Authentication error during config flow")
         raise ValueError("Cannot connect") from ex
 
 

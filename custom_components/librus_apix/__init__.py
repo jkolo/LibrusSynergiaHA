@@ -1,60 +1,52 @@
 """The Librus APIX integration."""
 
+from __future__ import annotations
+
 import asyncio
 import logging
-import traceback
-from datetime import date
-from typing import Dict, Any
+from datetime import date as _date, timedelta
+from typing import Any
 
-import voluptuous as vol
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import CONF_PASSWORD, CONF_USERNAME
 from homeassistant.core import HomeAssistant
-from homeassistant.const import CONF_USERNAME, CONF_PASSWORD
-from homeassistant.helpers.aiohttp_client import async_get_clientsession
-from homeassistant.helpers import config_validation as cv
+from homeassistant.exceptions import ConfigEntryNotReady
 
 from librus_apix.client import Client, new_client
 from librus_apix.exceptions import TokenError
+from librus_apix.grades import get_grades
+from librus_apix.messages import get_received
+from librus_apix.schedule import get_schedule
+from librus_apix.student_information import get_student_information
+from librus_apix.timetable import get_timetable
 
-from .const import DOMAIN, SCAN_INTERVAL
+from .const import DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
 
-
-def _current_semester() -> int:
-    """Zwroc numer biezacego semestru (1 lub 2) wg polskiego roku szkolnego.
-
-    Semestr 1: wrzesien (9) - styczen (1)
-    Semestr 2: luty (2) - czerwiec (6)
-    Lipiec-sierpien to wakacje - zwracamy 2 (ostatni semestr roku).
-    """
-    m = date.today().month
-    return 1 if m >= 9 else 2
-
 PLATFORMS = ["sensor", "calendar"]
 
-CONFIG_SCHEMA = vol.Schema(
-    {
-        DOMAIN: vol.Schema(
-            {
-                vol.Required(CONF_USERNAME): cv.string,
-                vol.Required(CONF_PASSWORD): cv.string,
-            }
-        )
-    },
-    extra=vol.ALLOW_EXTRA,
-)
+
+def _current_semester() -> int:
+    """Return current Polish school-year semester (1 or 2).
+
+    Semester 1: September (9) - January (1).
+    Semester 2: February (2) - June (6).
+    July/August are summer break - we return 2 (last semester of the year).
+    """
+    m = _date.today().month
+    return 1 if m >= 9 else 2
 
 
 class LibrusApiClient:
     """Class to interface with the Librus API."""
 
-    def __init__(self, username: str, password: str):
+    def __init__(self, username: str, password: str) -> None:
         """Initialize the client."""
         self.username = username
         self.password = password
-        self._client: Client = None
-        self._token = None
+        self._client: Client | None = None
+        self._token: Any | None = None
         self._auth_lock = asyncio.Lock()
 
     def _reset_auth(self) -> None:
@@ -62,7 +54,7 @@ class LibrusApiClient:
         self._client = None
         self._token = None
 
-    async def async_authenticate(self):
+    async def async_authenticate(self) -> bool:
         """Authenticate with Librus API."""
         async with self._auth_lock:
             try:
@@ -73,12 +65,12 @@ class LibrusApiClient:
                 )
                 _LOGGER.debug("Authentication successful for %s", self.username)
                 return True
-            except Exception as ex:
-                _LOGGER.error("Authentication failed: %s\n%s", ex, traceback.format_exc())
+            except Exception:
+                _LOGGER.exception("Authentication failed")
                 self._reset_auth()
                 return False
 
-    async def async_get_grades(self):
+    async def async_get_grades(self) -> list[dict[str, Any]] | None:
         """Get grades from Librus."""
         for attempt in range(2):
             try:
@@ -86,8 +78,6 @@ class LibrusApiClient:
                     if not await self.async_authenticate():
                         return None
                 client = self._client
-
-                from librus_apix.grades import get_grades
 
                 loop = asyncio.get_running_loop()
                 numeric_grades, average_grades, descriptive_grades = await loop.run_in_executor(
@@ -138,7 +128,7 @@ class LibrusApiClient:
 
                 return all_grades
 
-            except TokenError as ex:
+            except TokenError:
                 _LOGGER.warning(
                     "Token expired fetching grades (attempt %d/2), re-authenticating...",
                     attempt + 1,
@@ -147,17 +137,21 @@ class LibrusApiClient:
                 if attempt == 1:
                     _LOGGER.error("Failed to get grades after re-authentication.")
                     return None
-            except Exception as ex:
-                _LOGGER.error(
-                    "Failed to get grades (attempt %d/2): %s\n%s",
-                    attempt + 1, ex, traceback.format_exc(),
+            except Exception:
+                _LOGGER.exception(
+                    "Failed to get grades (attempt %d/2)", attempt + 1
                 )
                 self._reset_auth()
                 if attempt == 1:
                     return None
+        return None
 
-    async def async_get_messages(self, count: int = 10):
-        """Get latest messages from Librus (subject and sender only, no content fetch to avoid marking as read)."""
+    async def async_get_messages(self, count: int = 10) -> list[dict[str, Any]] | None:
+        """Get latest messages from Librus.
+
+        Only subject and sender are returned — message body is NOT fetched
+        to avoid marking messages as read in Librus.
+        """
         for attempt in range(2):
             try:
                 if not self._client or not self._token:
@@ -165,13 +159,11 @@ class LibrusApiClient:
                         return None
                 client = self._client
 
-                from librus_apix.messages import get_received
-
                 loop = asyncio.get_running_loop()
                 messages = await loop.run_in_executor(None, get_received, client, 0)
                 messages = messages[:count] if messages else []
 
-                result = [
+                return [
                     {
                         "author": msg.author,
                         "title": msg.title,
@@ -183,9 +175,7 @@ class LibrusApiClient:
                     for msg in messages
                 ]
 
-                return result
-
-            except TokenError as ex:
+            except TokenError:
                 _LOGGER.warning(
                     "Token expired fetching messages (attempt %d/2), re-authenticating...",
                     attempt + 1,
@@ -194,19 +184,17 @@ class LibrusApiClient:
                 if attempt == 1:
                     _LOGGER.error("Failed to get messages after re-authentication.")
                     return None
-            except Exception as ex:
-                _LOGGER.error(
-                    "Failed to get messages (attempt %d/2): %s\n%s",
-                    attempt + 1, ex, traceback.format_exc(),
+            except Exception:
+                _LOGGER.exception(
+                    "Failed to get messages (attempt %d/2)", attempt + 1
                 )
                 self._reset_auth()
                 if attempt == 1:
                     return None
+        return None
 
-    async def async_get_student_information(self):
+    async def async_get_student_information(self) -> Any | None:
         """Get student information from Librus."""
-        from librus_apix.student_information import get_student_information
-
         for attempt in range(2):
             try:
                 if not self._client or not self._token:
@@ -227,18 +215,18 @@ class LibrusApiClient:
                 if attempt == 1:
                     _LOGGER.error("Failed to get student info after re-authentication.")
                     return None
-            except Exception as ex:
-                _LOGGER.error(
-                    "Failed to get student information (attempt %d/2): %s\n%s",
-                    attempt + 1, ex, traceback.format_exc(),
+            except Exception:
+                _LOGGER.exception(
+                    "Failed to get student information (attempt %d/2)", attempt + 1
                 )
                 self._reset_auth()
                 if attempt == 1:
                     return None
+        return None
 
     async def async_get_schedule_events(
         self, months_ahead: int = 2, only_exams: bool = True
-    ):
+    ) -> list[dict[str, Any]] | None:
         """Pobierz wydarzenia z terminarza Librusa.
 
         Args:
@@ -251,8 +239,6 @@ class LibrusApiClient:
             Lista dictow z polami: title, subject, category, date (YYYY-MM-DD),
             hour, day, href, days_until, is_exam, is_day_off.
         """
-        from datetime import date as _date, timedelta
-
         for attempt in range(2):
             try:
                 if not self._client or not self._token:
@@ -260,13 +246,10 @@ class LibrusApiClient:
                         return None
                 client = self._client
 
-                from librus_apix.schedule import get_schedule
-
                 loop = asyncio.get_running_loop()
                 today = _date.today()
 
                 # Pobierz schedule dla biezacego + nastepnych miesiecy
-                merged: Dict[int, list] = {}
                 month_year_pairs = []
                 for offset in range(months_ahead):
                     target = today.replace(day=1) + timedelta(days=32 * offset)
@@ -381,7 +364,7 @@ class LibrusApiClient:
                 upcoming.sort(key=lambda e: (e["date"], e.get("hour") or ""))
                 return upcoming
 
-            except TokenError as ex:
+            except TokenError:
                 _LOGGER.warning(
                     "Token expired fetching schedule (attempt %d/2), re-authenticating...",
                     attempt + 1,
@@ -390,16 +373,18 @@ class LibrusApiClient:
                 if attempt == 1:
                     _LOGGER.error("Failed to get schedule after re-authentication.")
                     return None
-            except Exception as ex:
-                _LOGGER.error(
-                    "Failed to get schedule (attempt %d/2): %s\n%s",
-                    attempt + 1, ex, traceback.format_exc(),
+            except Exception:
+                _LOGGER.exception(
+                    "Failed to get schedule (attempt %d/2)", attempt + 1
                 )
                 self._reset_auth()
                 if attempt == 1:
                     return None
+        return None
 
-    async def async_get_timetable_events(self, weeks_ahead: int = 2):
+    async def async_get_timetable_events(
+        self, weeks_ahead: int = 2
+    ) -> list[dict[str, Any]] | None:
         """Pobierz plan lekcji z Librusa (timetable).
 
         Args:
@@ -410,7 +395,7 @@ class LibrusApiClient:
             time_from (HH:MM), time_to (HH:MM), weekday, lesson_number, info.
             None jesli blad.
         """
-        from datetime import date as _date, datetime as _dt, timedelta
+        from datetime import datetime as _dt
 
         for attempt in range(2):
             try:
@@ -418,8 +403,6 @@ class LibrusApiClient:
                     if not await self.async_authenticate():
                         return None
                 client = self._client
-
-                from librus_apix.timetable import get_timetable
 
                 loop = asyncio.get_running_loop()
                 today = _date.today()
@@ -463,7 +446,7 @@ class LibrusApiClient:
                 lessons.sort(key=lambda l: (l["date"], l.get("time_from") or ""))
                 return lessons
 
-            except TokenError as ex:
+            except TokenError:
                 _LOGGER.warning(
                     "Token expired fetching timetable (attempt %d/2), re-authenticating...",
                     attempt + 1,
@@ -472,39 +455,18 @@ class LibrusApiClient:
                 if attempt == 1:
                     _LOGGER.error("Failed to get timetable after re-authentication.")
                     return None
-            except Exception as ex:
-                _LOGGER.error(
-                    "Failed to get timetable (attempt %d/2): %s\n%s",
-                    attempt + 1, ex, traceback.format_exc(),
+            except Exception:
+                _LOGGER.exception(
+                    "Failed to get timetable (attempt %d/2)", attempt + 1
                 )
                 self._reset_auth()
                 if attempt == 1:
                     return None
-
-
-async def async_setup(hass: HomeAssistant, config: Dict[str, Any]) -> bool:
-    """Set up the Librus APIX component."""
-    hass.data.setdefault(DOMAIN, {})
-    
-    if DOMAIN in config:
-        username = config[DOMAIN][CONF_USERNAME]
-        password = config[DOMAIN][CONF_PASSWORD]
-        
-        client = LibrusApiClient(username, password)
-        hass.data[DOMAIN]["client"] = client
-        
-        # Test authentication
-        if not await client.async_authenticate():
-            _LOGGER.error("Failed to authenticate")
-            return False
-
-    return True
+        return None
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Librus APIX from a config entry."""
-    from homeassistant.exceptions import ConfigEntryNotReady
-
     username = entry.data[CONF_USERNAME]
     password = entry.data[CONF_PASSWORD]
 

@@ -1,13 +1,11 @@
 """Constants for the Librus APIX integration."""
 
+from __future__ import annotations
+
 from datetime import timedelta
 
 DOMAIN = "librus_apix"
 DEFAULT_NAME = "Librus"
-
-# Configuration keys
-CONF_USERNAME = "username"
-CONF_PASSWORD = "password"
 
 # Update intervals
 SCAN_INTERVAL = timedelta(hours=2)

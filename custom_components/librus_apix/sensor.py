@@ -1,8 +1,10 @@
 ﻿"""Platforma czujników dla integracji Librus APIX."""
 
+from __future__ import annotations
+
 import logging
 from datetime import date, datetime, timedelta
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from homeassistant.components.sensor import SensorEntity, SensorStateClass
 from homeassistant.config_entries import ConfigEntry
@@ -13,6 +15,7 @@ from homeassistant.helpers.update_coordinator import (
     DataUpdateCoordinator,
     UpdateFailed,
 )
+from homeassistant.util import slugify
 
 from .const import DOMAIN, SCAN_INTERVAL
 
@@ -40,7 +43,7 @@ def _jest_nowa(date_str: str) -> bool:
     return False
 
 
-def _srednia_ocen(oceny: List[Dict]) -> Optional[float]:
+def _srednia_ocen(oceny: list[dict]) -> float | None:
     """Oblicz srednia ocen z listy ocen."""
     wartosci = []
     for g in oceny:
@@ -76,7 +79,7 @@ async def async_setup_entry(
         await coordinator.async_config_entry_first_refresh()
         hass.data[DOMAIN][coord_key] = coordinator
 
-    entities: List[SensorEntity] = [
+    entities: list[SensorEntity] = [
         LibrusUczenSensor(coordinator, config_entry),
         LibrusSzczesliwyNumerekSensor(coordinator, config_entry),
         LibrusOcenySensor(coordinator, config_entry),
@@ -117,7 +120,7 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator):
             update_interval=SCAN_INTERVAL,
         )
 
-    async def _async_update_data(self) -> Dict[str, Any]:
+    async def _async_update_data(self) -> dict[str, Any]:
         """Pobierz aktualne dane z API Librus."""
         from datetime import date as _date
         current_sem = 1 if _date.today().month >= 9 else 2
@@ -171,7 +174,7 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator):
                 }
 
             # Grupuj oceny wg przedmiotu i oznacz nowe
-            oceny_wg_przedmiotu: Dict[str, List[Dict]] = {}
+            oceny_wg_przedmiotu: dict[str, list[dict]] = {}
             for grade in grades:
                 subject = grade["subject"]
                 if subject not in oceny_wg_przedmiotu:
@@ -225,9 +228,9 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator):
 
     def _fire_events(
         self,
-        messages: List[Dict],
-        grades: List[Dict],
-        zapowiedzi: Optional[List[Dict]] = None,
+        messages: list[dict],
+        grades: list[dict],
+        zapowiedzi: list[dict] | None = None,
     ) -> None:
         """Wyslij zdarzenia HA dla nowych wiadomosci, ocen i zapowiedzi."""
         for msg in messages:
@@ -281,7 +284,7 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator):
                     },
                 )
 
-    def _build_wiadomosci(self, messages: Optional[List[Dict]]) -> List[Dict]:
+    def _build_wiadomosci(self, messages: list[dict] | None) -> list[dict]:
         """Oznacz nowe wiadomosci i zwroc liste."""
         result = []
         for msg in messages or []:
@@ -290,7 +293,7 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator):
         return result
 
 
-def _device_info(coordinator: DataUpdateCoordinator, config_entry: ConfigEntry) -> Dict[str, Any]:
+def _device_info(coordinator: DataUpdateCoordinator, config_entry: ConfigEntry) -> dict[str, Any]:
     """Zwroc informacje o urzadzeniu."""
     data = coordinator.data or {}
     student_info = data.get("student_info")
@@ -316,16 +319,16 @@ class LibrusUczenSensor(CoordinatorEntity, SensorEntity):
         self._attr_icon = "mdi:account-school"
 
     @property
-    def device_info(self) -> Dict[str, Any]:
+    def device_info(self) -> dict[str, Any]:
         return _device_info(self.coordinator, self._config_entry)
 
     @property
-    def native_value(self) -> Optional[str]:
+    def native_value(self) -> str | None:
         info = (self.coordinator.data or {}).get("student_info")
         return info.name if info else None
 
     @property
-    def extra_state_attributes(self) -> Dict[str, Any]:
+    def extra_state_attributes(self) -> dict[str, Any]:
         info = (self.coordinator.data or {}).get("student_info")
         if not info:
             return {}
@@ -351,7 +354,7 @@ class LibrusSzczesliwyNumerekSensor(CoordinatorEntity, SensorEntity):
         self._attr_icon = "mdi:numeric"
 
     @property
-    def device_info(self) -> Dict[str, Any]:
+    def device_info(self) -> dict[str, Any]:
         return _device_info(self.coordinator, self._config_entry)
 
     @property
@@ -373,7 +376,7 @@ class LibrusOcenySensor(CoordinatorEntity, SensorEntity):
         self._attr_icon = "mdi:school"
 
     @property
-    def device_info(self) -> Dict[str, Any]:
+    def device_info(self) -> dict[str, Any]:
         return _device_info(self.coordinator, self._config_entry)
 
     @property
@@ -381,7 +384,7 @@ class LibrusOcenySensor(CoordinatorEntity, SensorEntity):
         return len((self.coordinator.data or {}).get("oceny", []))
 
     @property
-    def extra_state_attributes(self) -> Dict[str, Any]:
+    def extra_state_attributes(self) -> dict[str, Any]:
         data = self.coordinator.data or {}
         oceny_wg_przedmiotu = data.get("oceny_wg_przedmiotu", {})
         sa_nowe = any(
@@ -418,11 +421,11 @@ class LibrusPrzedmiotSensor(CoordinatorEntity, SensorEntity):
         self._attr_icon = "mdi:book-open-variant"
 
     @property
-    def device_info(self) -> Dict[str, Any]:
+    def device_info(self) -> dict[str, Any]:
         return _device_info(self.coordinator, self._config_entry)
 
     @property
-    def native_value(self) -> Optional[int]:
+    def native_value(self) -> int | None:
         # State HA jest ograniczony do 255 znakow - przy duzej liczbie ocen
         # zlaczona lista by sie ucinala. Trzymamy liczbe ocen jako state,
         # pelna lista jest w atrybucie "lista_ocen".
@@ -430,7 +433,7 @@ class LibrusPrzedmiotSensor(CoordinatorEntity, SensorEntity):
         return len(oceny) if oceny else None
 
     @property
-    def extra_state_attributes(self) -> Dict[str, Any]:
+    def extra_state_attributes(self) -> dict[str, Any]:
         oceny = (self.coordinator.data or {}).get("oceny_wg_przedmiotu", {}).get(self._subject, [])
         if not oceny:
             return {}
@@ -438,8 +441,8 @@ class LibrusPrzedmiotSensor(CoordinatorEntity, SensorEntity):
         srednia = _srednia_ocen(oceny)
 
         # Najnowsza ocena wg daty
-        najnowsza: Optional[Dict] = None
-        najnowsza_data: Optional[date] = None
+        najnowsza: dict | None = None
+        najnowsza_data: date | None = None
         for g in oceny:
             for fmt in ("%d.%m.%Y", "%Y-%m-%d"):
                 try:
@@ -475,11 +478,11 @@ class LibrusSredniaOcenSensor(CoordinatorEntity, SensorEntity):
         self._attr_native_unit_of_measurement = None
 
     @property
-    def device_info(self) -> Dict[str, Any]:
+    def device_info(self) -> dict[str, Any]:
         return _device_info(self.coordinator, self._config_entry)
 
     @property
-    def native_value(self) -> Optional[float]:
+    def native_value(self) -> float | None:
         data = self.coordinator.data or {}
         wszystkie = [
             g
@@ -489,7 +492,7 @@ class LibrusSredniaOcenSensor(CoordinatorEntity, SensorEntity):
         return _srednia_ocen(wszystkie)
 
     @property
-    def extra_state_attributes(self) -> Dict[str, Any]:
+    def extra_state_attributes(self) -> dict[str, Any]:
         data = self.coordinator.data or {}
         srednie_przedmiotow = {
             subject: _srednia_ocen(oceny)
@@ -524,16 +527,16 @@ class LibrusSredniaPrzedmiotuSensor(CoordinatorEntity, SensorEntity):
         self._attr_native_unit_of_measurement = None
 
     @property
-    def device_info(self) -> Dict[str, Any]:
+    def device_info(self) -> dict[str, Any]:
         return _device_info(self.coordinator, self._config_entry)
 
     @property
-    def native_value(self) -> Optional[float]:
+    def native_value(self) -> float | None:
         oceny = (self.coordinator.data or {}).get("oceny_wg_przedmiotu", {}).get(self._subject, [])
         return _srednia_ocen(oceny)
 
     @property
-    def extra_state_attributes(self) -> Dict[str, Any]:
+    def extra_state_attributes(self) -> dict[str, Any]:
         oceny = (self.coordinator.data or {}).get("oceny_wg_przedmiotu", {}).get(self._subject, [])
         return {
             "przedmiot": self._subject,
@@ -555,7 +558,7 @@ class LibrusWiadomosciSensor(CoordinatorEntity, SensorEntity):
         self._attr_icon = "mdi:message-text"
 
     @property
-    def device_info(self) -> Dict[str, Any]:
+    def device_info(self) -> dict[str, Any]:
         return _device_info(self.coordinator, self._config_entry)
 
     @property
@@ -565,7 +568,7 @@ class LibrusWiadomosciSensor(CoordinatorEntity, SensorEntity):
         return sum(1 for m in msgs if m.get("unread", False))
 
     @property
-    def extra_state_attributes(self) -> Dict[str, Any]:
+    def extra_state_attributes(self) -> dict[str, Any]:
         # Pelna lista (do 10) zeby liczniki byly spojne z native_value;
         # widok ograniczamy tylko dla pola "wiadomosci".
         all_msgs = (self.coordinator.data or {}).get("wiadomosci", [])
@@ -604,7 +607,7 @@ class LibrusZapowiedziSensor(CoordinatorEntity, SensorEntity):
         self._attr_state_class = SensorStateClass.MEASUREMENT
 
     @property
-    def device_info(self) -> Dict[str, Any]:
+    def device_info(self) -> dict[str, Any]:
         return _device_info(self.coordinator, self._config_entry)
 
     @property
@@ -614,7 +617,7 @@ class LibrusZapowiedziSensor(CoordinatorEntity, SensorEntity):
         return sum(1 for z in zapowiedzi if z.get("days_until", 99) <= 14)
 
     @property
-    def extra_state_attributes(self) -> Dict[str, Any]:
+    def extra_state_attributes(self) -> dict[str, Any]:
         zapowiedzi = (self.coordinator.data or {}).get("zapowiedzi", []) or []
         next_event = zapowiedzi[0] if zapowiedzi else None
         return {

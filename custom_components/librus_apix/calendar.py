@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import logging
 from datetime import date as _date, datetime, time, timedelta
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from homeassistant.components.calendar import CalendarEntity, CalendarEvent
 from homeassistant.config_entries import ConfigEntry
@@ -50,7 +50,7 @@ async def async_setup_entry(
     ])
 
 
-def _device_info(coordinator, config_entry: ConfigEntry) -> Dict[str, Any]:
+def _device_info(coordinator, config_entry: ConfigEntry) -> dict[str, Any]:
     """Zwroc informacje o urzadzeniu (wspolny z sensor.py)."""
     data = coordinator.data or {}
     student_info = data.get("student_info")
@@ -63,7 +63,7 @@ def _device_info(coordinator, config_entry: ConfigEntry) -> Dict[str, Any]:
     }
 
 
-def _parse_hour_range(hour_str: str) -> tuple[Optional[time], Optional[time]]:
+def _parse_hour_range(hour_str: str) -> tuple[time | None, time | None]:
     """Sparsuj 'HH:MM - HH:MM' (lub 'HH:MM') do tuple czasow."""
     if not hour_str:
         return None, None
@@ -81,7 +81,7 @@ def _parse_hour_range(hour_str: str) -> tuple[Optional[time], Optional[time]]:
     return start, end
 
 
-def _terminarz_event_to_calendar_event(event_dict: dict) -> Optional[CalendarEvent]:
+def _terminarz_event_to_calendar_event(event_dict: dict) -> CalendarEvent | None:
     """Konwertuj event z terminarza Librusa na HA CalendarEvent z tagami."""
     date_iso = event_dict.get("date")
     if not date_iso:
@@ -144,7 +144,7 @@ def _terminarz_event_to_calendar_event(event_dict: dict) -> Optional[CalendarEve
     )
 
 
-def _lekcja_to_calendar_event(period: dict) -> Optional[CalendarEvent]:
+def _lekcja_to_calendar_event(period: dict) -> CalendarEvent | None:
     """Konwertuj period planu lekcji na HA CalendarEvent."""
     date_iso = period.get("date")
     time_from = period.get("time_from")
@@ -194,23 +194,23 @@ class LibrusBaseCalendar(CoordinatorEntity, CalendarEntity):
         self._config_entry = config_entry
 
     @property
-    def device_info(self) -> Dict[str, Any]:
+    def device_info(self) -> dict[str, Any]:
         return _device_info(self.coordinator, self._config_entry)
 
-    def _convert(self, raw: dict) -> Optional[CalendarEvent]:
+    def _convert(self, raw: dict) -> CalendarEvent | None:
         raise NotImplementedError
 
-    def _all_events(self) -> List[dict]:
+    def _all_events(self) -> list[dict]:
         raise NotImplementedError
 
     @property
-    def event(self) -> Optional[CalendarEvent]:
+    def event(self) -> CalendarEvent | None:
         # CalendarEntity.event ma byc *aktywnym lub najblizszym przyszlym* eventem,
         # nie pierwszym z listy. Plan lekcji zawiera caly biezacy tydzien (lacznie
         # z lekcjami z poniedzialku rano) — bez tego filtra w piatek wieczorem
         # state pokazywal poniedzialkowa pierwsza lekcje.
         now = dt_util.now()
-        next_event: Optional[CalendarEvent] = None
+        next_event: CalendarEvent | None = None
         for raw in self._all_events():
             ev = self._convert(raw)
             if ev is None:
@@ -248,8 +248,8 @@ class LibrusBaseCalendar(CoordinatorEntity, CalendarEntity):
         hass: HomeAssistant,
         start_date: datetime,
         end_date: datetime,
-    ) -> List[CalendarEvent]:
-        out: List[CalendarEvent] = []
+    ) -> list[CalendarEvent]:
+        out: list[CalendarEvent] = []
         for raw in self._all_events():
             ev = self._convert(raw)
             if ev is None:
@@ -274,10 +274,10 @@ class LibrusTerminarzCalendar(LibrusBaseCalendar):
         self._attr_unique_id = f"{config_entry.entry_id}_calendar_terminarz"
         self._attr_icon = "mdi:calendar-text"
 
-    def _all_events(self) -> List[dict]:
+    def _all_events(self) -> list[dict]:
         return (self.coordinator.data or {}).get("terminarz") or []
 
-    def _convert(self, raw: dict) -> Optional[CalendarEvent]:
+    def _convert(self, raw: dict) -> CalendarEvent | None:
         return _terminarz_event_to_calendar_event(raw)
 
 
@@ -290,8 +290,8 @@ class LibrusPlanLekcjiCalendar(LibrusBaseCalendar):
         self._attr_unique_id = f"{config_entry.entry_id}_calendar_plan_lekcji"
         self._attr_icon = "mdi:timetable"
 
-    def _all_events(self) -> List[dict]:
+    def _all_events(self) -> list[dict]:
         return (self.coordinator.data or {}).get("plan_lekcji") or []
 
-    def _convert(self, raw: dict) -> Optional[CalendarEvent]:
+    def _convert(self, raw: dict) -> CalendarEvent | None:
         return _lekcja_to_calendar_event(raw)
