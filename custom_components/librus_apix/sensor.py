@@ -192,27 +192,27 @@ class LibrusSensorEntityDescription(SensorEntityDescription):
 SENSORS: tuple[LibrusSensorEntityDescription, ...] = (
     LibrusSensorEntityDescription(
         key="uczen",
-        name="Informacje o uczniu",
+        translation_key="student_info",
         icon="mdi:account-school",
         value_fn=_val_uczen,
         attrs_fn=_attrs_uczen,
     ),
     LibrusSensorEntityDescription(
         key="szczesliwy_numerek",
-        name="Szczesliwy numerek",
+        translation_key="lucky_number",
         icon="mdi:numeric",
         value_fn=_val_lucky,
     ),
     LibrusSensorEntityDescription(
         key="oceny",
-        name="Oceny",
+        translation_key="grades",
         icon="mdi:school",
         value_fn=_val_grades_count,
         attrs_fn=_attrs_grades,
     ),
     LibrusSensorEntityDescription(
         key="srednia_ocen",
-        name="Srednia ocen",
+        translation_key="overall_average",
         icon="mdi:chart-line",
         state_class=SensorStateClass.MEASUREMENT,
         value_fn=_val_overall_average,
@@ -220,14 +220,14 @@ SENSORS: tuple[LibrusSensorEntityDescription, ...] = (
     ),
     LibrusSensorEntityDescription(
         key="wiadomosci",
-        name="Wiadomosci",
+        translation_key="messages",
         icon="mdi:message-text",
         value_fn=_val_unread_count,
         attrs_fn=_attrs_messages,
     ),
     LibrusSensorEntityDescription(
         key="zapowiedzi",
-        name="Zapowiedzi",
+        translation_key="upcoming_exams",
         icon="mdi:calendar-alert",
         state_class=SensorStateClass.MEASUREMENT,
         value_fn=_val_upcoming_exams_count,

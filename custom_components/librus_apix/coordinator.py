@@ -210,7 +210,8 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         except LibrusAuthError as err:
             # Password likely changed in Librus — start reauth flow.
             raise ConfigEntryAuthFailed(
-                "Authentication permanently failed — please re-enter password."
+                translation_domain=DOMAIN,
+                translation_key="auth_failed",
             ) from err
         except UpdateFailed:
             raise

@@ -35,5 +35,40 @@
       "reconfigure_successful": "Reconfiguration successful — integration reloaded.",
       "account_mismatch": "The new username does not match this config entry. To use a different account, add it as a new integration."
     }
+  },
+  "entity": {
+    "sensor": {
+      "student_info": {
+        "name": "Student information"
+      },
+      "lucky_number": {
+        "name": "Lucky number"
+      },
+      "grades": {
+        "name": "Grades"
+      },
+      "overall_average": {
+        "name": "Overall average"
+      },
+      "messages": {
+        "name": "Messages"
+      },
+      "upcoming_exams": {
+        "name": "Upcoming exams"
+      }
+    },
+    "calendar": {
+      "schedule": {
+        "name": "Schedule"
+      },
+      "timetable": {
+        "name": "Timetable"
+      }
+    }
+  },
+  "exceptions": {
+    "auth_failed": {
+      "message": "Authentication permanently failed — please re-enter password."
+    }
   }
 }
