@@ -19,15 +19,12 @@ fi
 
 # Create necessary directories
 echo "📁 Creating directories..."
-mkdir -p config/custom_components
 mkdir -p themes
 
-# Copy integration files
-echo "📋 Copying integration files..."
-if [ -d "custom_components" ]; then
-    cp -r custom_components/librus_apix config/custom_components/
-    echo "✅ Integration copied successfully"
-else
+# Custom components are mounted directly via docker-compose volume
+# (./custom_components -> /config/custom_components:ro). Nie kopiujemy
+# do config/custom_components, zeby uniknac dwoch sciezek tego samego kodu.
+if [ ! -d "custom_components" ]; then
     echo "❌ Custom components not found!"
     exit 1
 fi
