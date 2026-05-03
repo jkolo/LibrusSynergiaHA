@@ -36,6 +36,23 @@
       "account_mismatch": "The new username does not match this config entry. To use a different account, add it as a new integration."
     }
   },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Human-like sync settings",
+        "description": "Tune how the integration paces its synchronisations to look like a real user. Defaults are conservative and safe.",
+        "data": {
+          "base_minutes": "Base interval (minutes)",
+          "jitter": "Jitter fraction (0.0–0.5)",
+          "quiet_hours_enabled": "Skip syncs during quiet hours",
+          "quiet_start": "Quiet hours start (HH:MM)",
+          "quiet_end": "Quiet hours end (HH:MM)",
+          "off_school_multiplier": "Multiplier on weekends, holidays and breaks",
+          "humanize": "Enable human-like sync (off = legacy fixed cadence)"
+        }
+      }
+    }
+  },
   "entity": {
     "sensor": {
       "student_info": {

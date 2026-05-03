@@ -201,3 +201,112 @@ async def test_reconfigure_flow_blocks_username_change(
     )
     assert result2["type"] == FlowResultType.ABORT
     assert result2["reason"] == "account_mismatch"
+
+
+# ---------- Options flow (PR 6 — humanize-sync tunables) ----------
+
+
+async def test_options_flow_shows_form_with_defaults(
+    hass: HomeAssistant, mock_validate_input
+):
+    """Otwarcie options pokazuje form z defaultami."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={CONF_USERNAME: "test_user", CONF_PASSWORD: "p"},
+        unique_id="test_user",
+    )
+    entry.add_to_hass(hass)
+    await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    assert result["type"] == FlowResultType.FORM
+    assert result["step_id"] == "init"
+
+
+async def test_options_flow_saves_user_input(
+    hass: HomeAssistant, mock_validate_input
+):
+    """Submit options → wartości lądują w entry.options i triggerują reload."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={CONF_USERNAME: "test_user", CONF_PASSWORD: "p"},
+        unique_id="test_user",
+    )
+    entry.add_to_hass(hass)
+    await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    result2 = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        user_input={
+            "base_minutes": 60,
+            "jitter": 0.1,
+            "quiet_hours_enabled": True,
+            "quiet_start": "23:00",
+            "quiet_end": "07:00",
+            "off_school_multiplier": 4.0,
+            "humanize": True,
+        },
+    )
+    await hass.async_block_till_done()
+
+    assert result2["type"] == FlowResultType.CREATE_ENTRY
+    assert entry.options["base_minutes"] == 60
+    assert entry.options["jitter"] == 0.1
+    assert entry.options["quiet_hours_enabled"] is True
+    assert entry.options["off_school_multiplier"] == 4.0
+    assert entry.options["humanize"] is True
+
+
+async def test_options_flow_humanize_off_disables_features(
+    hass: HomeAssistant, mock_validate_input
+):
+    """humanize=False przelacza koordynator na legacy mode (sprawdz przez delay)."""
+    import random as _random
+    from datetime import datetime
+    from unittest.mock import patch
+
+    from freezegun import freeze_time
+
+    from custom_components.librus_apix.coordinator import (
+        LibrusDataUpdateCoordinator,
+    )
+
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={CONF_USERNAME: "test_user", CONF_PASSWORD: "p"},
+        options={
+            "humanize": False,
+            "base_minutes": 60,
+        },
+        unique_id="test_user",
+    )
+    entry.add_to_hass(hass)
+
+    # Spawn coordinator with our entry directly so we control its options.
+    from unittest.mock import MagicMock
+    fake = MagicMock()
+    fake.username = "x"
+    fake.async_authenticate = AsyncMock(return_value=True)
+    fake.async_get_student_information = AsyncMock(return_value=None)
+    fake.async_get_grades = AsyncMock(return_value=[])
+    fake.async_get_messages = AsyncMock(return_value=[])
+    fake.async_get_schedule_events = AsyncMock(return_value=[])
+    fake.async_get_timetable_events = AsyncMock(return_value=[])
+
+    coordinator = LibrusDataUpdateCoordinator(
+        hass, fake, config_entry=entry, rng=_random.Random(42)
+    )
+
+    # Saturday — legacy mode ignores off-school multiplier and jitter.
+    with freeze_time("2026-05-09 10:00:00"):
+        with patch(
+            "custom_components.librus_apix.coordinator.async_call_later"
+        ) as call_later:
+            coordinator.schedule_next_refresh()
+
+    delay = call_later.call_args.args[1]
+    # Legacy: 60 min × 1.0 (no jitter, no off-school) → exactly 60*60 s.
+    assert delay == pytest.approx(60 * 60, rel=1e-6)

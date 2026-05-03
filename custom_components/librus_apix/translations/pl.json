@@ -36,6 +36,23 @@
       "account_mismatch": "Nowy login nie pasuje do tego config entry. Aby użyć innego konta, dodaj je jako nową integrację."
     }
   },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Synchronizacja zachowująca się jak człowiek",
+        "description": "Dostosuj jak integracja rozkłada synchronizacje w czasie, by wyglądały jak naturalne klikanie użytkownika. Wartości domyślne są bezpieczne.",
+        "data": {
+          "base_minutes": "Bazowy interwał (minuty)",
+          "jitter": "Losowe wahanie (0.0–0.5)",
+          "quiet_hours_enabled": "Pomijaj synchronizacje w godzinach ciszy nocnej",
+          "quiet_start": "Cisza nocna — początek (HH:MM)",
+          "quiet_end": "Cisza nocna — koniec (HH:MM)",
+          "off_school_multiplier": "Mnożnik w weekendy, święta i ferie",
+          "humanize": "Włącz tryb naturalnej synchronizacji (wyłącz = stały interwał, tryb legacy)"
+        }
+      }
+    }
+  },
   "entity": {
     "sensor": {
       "student_info": {

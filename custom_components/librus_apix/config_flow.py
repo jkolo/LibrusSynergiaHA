@@ -9,13 +9,30 @@ from typing import Any
 
 import voluptuous as vol
 from homeassistant import config_entries
+from homeassistant.config_entries import ConfigEntry, OptionsFlow
 from homeassistant.const import CONF_PASSWORD, CONF_USERNAME
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.data_entry_flow import FlowResult
 
 from librus_apix.client import new_client
 
-from .const import DOMAIN
+from .const import (
+    DEFAULT_BASE_MINUTES,
+    DEFAULT_HUMANIZE,
+    DEFAULT_JITTER,
+    DEFAULT_OFF_SCHOOL_MULTIPLIER,
+    DEFAULT_QUIET_END,
+    DEFAULT_QUIET_HOURS_ENABLED,
+    DEFAULT_QUIET_START,
+    DOMAIN,
+    OPT_BASE_MINUTES,
+    OPT_HUMANIZE,
+    OPT_JITTER,
+    OPT_OFF_SCHOOL_MULTIPLIER,
+    OPT_QUIET_END,
+    OPT_QUIET_HOURS_ENABLED,
+    OPT_QUIET_START,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -57,6 +74,12 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle a config flow for Librus APIX."""
 
     VERSION = 1
+
+    @staticmethod
+    @callback
+    def async_get_options_flow(config_entry: ConfigEntry) -> OptionsFlow:
+        """Return options handler — humanize-sync tunables (PR 6)."""
+        return LibrusOptionsFlow()
 
     # ---------- Initial setup (user-initiated add) ----------
 
@@ -172,3 +195,63 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             ),
             errors=errors,
         )
+
+
+# ---------- Options flow (humanize-sync tunables, PR 6) ----------
+
+
+class LibrusOptionsFlow(OptionsFlow):
+    """Tune the human-like sync behaviour without removing/re-adding the entry.
+
+    Form fields:
+        base_minutes: Median refresh interval (15–720 min).
+        jitter: Fraction of jitter around base (0.0–0.5).
+        quiet_hours_enabled: Skip refreshes during a nightly window.
+        quiet_start / quiet_end: HH:MM strings for the quiet window.
+        off_school_multiplier: Multiply interval on weekends, holidays, breaks.
+        humanize: Master switch — off restores the deterministic legacy mode.
+    """
+
+    async def async_step_init(self, user_input: dict | None = None) -> FlowResult:
+        """Show / save the options form."""
+        if user_input is not None:
+            return self.async_create_entry(title="", data=user_input)
+
+        opts = self.config_entry.options
+        schema = vol.Schema(
+            {
+                vol.Optional(
+                    OPT_BASE_MINUTES,
+                    default=opts.get(OPT_BASE_MINUTES, DEFAULT_BASE_MINUTES),
+                ): vol.All(int, vol.Range(min=15, max=720)),
+                vol.Optional(
+                    OPT_JITTER,
+                    default=opts.get(OPT_JITTER, DEFAULT_JITTER),
+                ): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=0.5)),
+                vol.Optional(
+                    OPT_QUIET_HOURS_ENABLED,
+                    default=opts.get(
+                        OPT_QUIET_HOURS_ENABLED, DEFAULT_QUIET_HOURS_ENABLED
+                    ),
+                ): bool,
+                vol.Optional(
+                    OPT_QUIET_START,
+                    default=opts.get(OPT_QUIET_START, DEFAULT_QUIET_START),
+                ): str,
+                vol.Optional(
+                    OPT_QUIET_END,
+                    default=opts.get(OPT_QUIET_END, DEFAULT_QUIET_END),
+                ): str,
+                vol.Optional(
+                    OPT_OFF_SCHOOL_MULTIPLIER,
+                    default=opts.get(
+                        OPT_OFF_SCHOOL_MULTIPLIER, DEFAULT_OFF_SCHOOL_MULTIPLIER
+                    ),
+                ): vol.All(vol.Coerce(float), vol.Range(min=1.0, max=10.0)),
+                vol.Optional(
+                    OPT_HUMANIZE,
+                    default=opts.get(OPT_HUMANIZE, DEFAULT_HUMANIZE),
+                ): bool,
+            }
+        )
+        return self.async_show_form(step_id="init", data_schema=schema)

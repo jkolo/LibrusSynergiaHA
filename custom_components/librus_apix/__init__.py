@@ -23,7 +23,7 @@ from librus_apix.schedule import get_schedule
 from librus_apix.student_information import get_student_information
 from librus_apix.timetable import get_timetable
 
-from .const import DOMAIN
+from .const import DEFAULT_HUMANIZE, DOMAIN, OPT_HUMANIZE
 from .coordinator import LibrusDataUpdateCoordinator
 from .humanize import build_headers, pick_user_agent
 
@@ -80,6 +80,7 @@ class LibrusApiClient:
         password: str,
         *,
         rng: random.Random | None = None,
+        humanize: bool = True,
     ) -> None:
         """Initialize the client.
 
@@ -89,6 +90,9 @@ class LibrusApiClient:
             rng: Optional `random.Random` for deterministic User-Agent
                 selection (testing) or per-entry stable choice (seed by
                 entry_id at the call site).
+            humanize: When False, skip the headers patch entirely so the
+                library uses its built-in defaults. Used by the OptionsFlow
+                "humanize=off" debug switch.
         """
         self.username = username
         self.password = password
@@ -96,13 +100,14 @@ class LibrusApiClient:
         self._token: Any | None = None
         self._auth_lock = asyncio.Lock()
         self._rng = rng or random.Random()
+        self._humanize = humanize
         # UA wybrany raz przy starcie integracji — przeglądarka też nie
         # zmienia UA mid-session. Stabilny do reloadu.
         self._user_agent = pick_user_agent(self._rng)
         self._headers = build_headers(self._user_agent)
         _LOGGER.debug(
-            "Librus client created for %s with User-Agent=%s",
-            username, self._user_agent,
+            "Librus client created for %s with User-Agent=%s, humanize=%s",
+            username, self._user_agent, humanize,
         )
 
     def _apply_headers(self) -> None:
@@ -113,10 +118,13 @@ class LibrusApiClient:
         dict's contents (not rebinding the name) we propagate our browser-
         like headers through all library calls without modifying the lib.
 
+        No-op when `humanize=False` — the library keeps its built-in UA.
         Idempotent — safe to call before every fetch. With multiple config
         entries the global dict can race; we accept this since both
         entries' headers are realistic (anti-bot won't notice the swap).
         """
+        if not self._humanize:
+            return
         librus_urls.HEADERS.clear()
         librus_urls.HEADERS.update(self._headers)
 
@@ -463,13 +471,22 @@ class LibrusApiClient:
         return await self._with_retry("timetable", _work)
 
 
+async def _async_options_updated(hass: HomeAssistant, entry: LibrusConfigEntry) -> None:
+    """Reload the entry whenever the user changes options."""
+    await hass.config_entries.async_reload(entry.entry_id)
+
+
 async def async_setup_entry(hass: HomeAssistant, entry: LibrusConfigEntry) -> bool:
     """Set up Librus APIX from a config entry."""
     # Seed RNG by entry_id so each child gets a stable but distinct UA
     # across HA restarts (deterministic per entry, different per entry).
     rng = random.Random(entry.entry_id)
+    humanize = entry.options.get(OPT_HUMANIZE, DEFAULT_HUMANIZE)
     client = LibrusApiClient(
-        entry.data[CONF_USERNAME], entry.data[CONF_PASSWORD], rng=rng
+        entry.data[CONF_USERNAME],
+        entry.data[CONF_PASSWORD],
+        rng=rng,
+        humanize=humanize,
     )
 
     # Coordinator wykonuje pierwszy login w _async_setup() podczas
@@ -484,11 +501,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: LibrusConfigEntry) -> bo
     await coordinator.async_config_entry_first_refresh()
 
     # Custom scheduler kicks off here so coordinator.data["schedule"] is
-    # already populated from the first refresh — future PR 5 will read it
-    # to slow down on school holidays.
+    # already populated from the first refresh — schedule_next_refresh
+    # reads is_school_day(today, schedule) to slow down on holidays.
     coordinator.schedule_next_refresh()
 
     entry.runtime_data = LibrusRuntimeData(client=client, coordinator=coordinator)
+    entry.async_on_unload(entry.add_update_listener(_async_options_updated))
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
