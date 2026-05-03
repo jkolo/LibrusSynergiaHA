@@ -70,5 +70,15 @@
     "auth_failed": {
       "message": "Authentication permanently failed — please re-enter password."
     }
+  },
+  "issues": {
+    "librus_lib_outdated": {
+      "title": "Librus parser may be outdated",
+      "description": "The Librus integration has been unable to fetch any data for {username} across multiple consecutive refreshes. This usually means Librus changed their HTML/CSS structure and the `librus-apix` library needs to be upgraded. Check the issue tracker for a newer release of the integration."
+    },
+    "auth_failed": {
+      "title": "Re-authentication required",
+      "description": "Authentication for {username} failed permanently. Home Assistant has started the re-authentication flow — open Settings → Devices & Services and enter the new Librus password to restore the integration."
+    }
   }
 }

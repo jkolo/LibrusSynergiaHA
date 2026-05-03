@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Any
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
+from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .const import DOMAIN, SCAN_INTERVAL
@@ -22,6 +23,16 @@ _LOGGER = logging.getLogger(__name__)
 # Trim seen-id sets to this many entries (LRU). A long-running HA instance
 # would otherwise let these grow unbounded over months/years.
 _MAX_SEEN_ITEMS = 500
+
+# Number of consecutive refreshes returning None for *every* endpoint before
+# we surface a repair issue. 5 ticks at 30 minute SCAN_INTERVAL ≈ 2.5 h —
+# enough to filter transient outages without making the user wait too long.
+_LIB_OUTDATED_THRESHOLD = 5
+
+# Repair issue identifiers (Gold rule `repair-issues`). Stable across refreshes
+# so HA can deduplicate and let the user dismiss them.
+ISSUE_LIB_OUTDATED = "librus_lib_outdated"
+ISSUE_AUTH_FAILED = "auth_failed"
 
 # Public event names (HA bus). v2.0.0 BREAKING: renamed from
 # librus_apix_nowa_* to librus_apix_new_*.
@@ -78,6 +89,10 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._seen_grade_ids: OrderedDict[tuple, None] = OrderedDict()
         self._seen_exam_ids: OrderedDict[tuple, None] = OrderedDict()
         self._first_run: bool = True
+        # Tracks consecutive ticks where every endpoint returned None — used
+        # to escalate to a repair issue suggesting a librus-apix upgrade
+        # (Librus likely changed HTML/CSS, breaking the parser).
+        self._consecutive_total_failures: int = 0
         super().__init__(
             hass,
             _LOGGER,
@@ -86,6 +101,41 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             update_interval=SCAN_INTERVAL,
             always_update=False,
         )
+
+    def _issue_id(self, kind: str) -> str:
+        """Per-entry issue id so multiple entries don't collide."""
+        entry_suffix = self.config_entry.entry_id if self.config_entry else "global"
+        return f"{kind}_{entry_suffix}"
+
+    def _create_issue_lib_outdated(self) -> None:
+        """Surface a repair issue suggesting a librus-apix package upgrade."""
+        ir.async_create_issue(
+            self.hass,
+            DOMAIN,
+            self._issue_id(ISSUE_LIB_OUTDATED),
+            is_fixable=False,
+            is_persistent=False,
+            severity=ir.IssueSeverity.WARNING,
+            translation_key=ISSUE_LIB_OUTDATED,
+            translation_placeholders={"username": self.client.username},
+            learn_more_url="https://github.com/LukMaverick/LibrusSynergiaHA/issues",
+        )
+
+    def _create_issue_auth_failed(self) -> None:
+        """Surface a repair issue mirroring the reauth flow for visibility."""
+        ir.async_create_issue(
+            self.hass,
+            DOMAIN,
+            self._issue_id(ISSUE_AUTH_FAILED),
+            is_fixable=False,
+            is_persistent=False,
+            severity=ir.IssueSeverity.ERROR,
+            translation_key=ISSUE_AUTH_FAILED,
+            translation_placeholders={"username": self.client.username},
+        )
+
+    def _clear_issue(self, kind: str) -> None:
+        ir.async_delete_issue(self.hass, DOMAIN, self._issue_id(kind))
 
     async def _async_setup(self) -> None:
         """One-time initialization: first login.
@@ -120,6 +170,22 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 else None
             )
             timetable = await self.client.async_get_timetable_events(weeks_ahead=4)
+
+            # Detect "every endpoint failed" (None) — indicates a likely
+            # parser breakage in librus-apix. Threshold guards against a
+            # single transient outage triggering a repair notification.
+            all_none = all(
+                v is None
+                for v in (student_info, grades, messages, schedule_all, timetable)
+            )
+            if all_none:
+                self._consecutive_total_failures += 1
+                if self._consecutive_total_failures >= _LIB_OUTDATED_THRESHOLD:
+                    self._create_issue_lib_outdated()
+            else:
+                if self._consecutive_total_failures > 0:
+                    self._clear_issue(ISSUE_LIB_OUTDATED)
+                self._consecutive_total_failures = 0
 
             if grades is None:
                 # Fall back to cached grades if available; refresh other slots
@@ -205,10 +271,15 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             else:
                 self._fire_events(annotated_messages, grades, exams_list)
 
+            # Successful refresh: clear the auth repair issue if present.
+            self._clear_issue(ISSUE_AUTH_FAILED)
             return result
 
         except LibrusAuthError as err:
-            # Password likely changed in Librus — start reauth flow.
+            # Password likely changed in Librus — start reauth flow and
+            # surface a repair issue so the user has a visible nudge in
+            # Settings → Repairs even if they miss the reauth notification.
+            self._create_issue_auth_failed()
             raise ConfigEntryAuthFailed(
                 translation_domain=DOMAIN,
                 translation_key="auth_failed",
