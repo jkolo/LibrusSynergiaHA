@@ -205,11 +205,43 @@ class LibrusBaseCalendar(CoordinatorEntity, CalendarEntity):
 
     @property
     def event(self) -> Optional[CalendarEvent]:
+        # CalendarEntity.event ma byc *aktywnym lub najblizszym przyszlym* eventem,
+        # nie pierwszym z listy. Plan lekcji zawiera caly biezacy tydzien (lacznie
+        # z lekcjami z poniedzialku rano) — bez tego filtra w piatek wieczorem
+        # state pokazywal poniedzialkowa pierwsza lekcje.
+        now = dt_util.now()
+        next_event: Optional[CalendarEvent] = None
         for raw in self._all_events():
             ev = self._convert(raw)
-            if ev:
-                return ev
-        return None
+            if ev is None:
+                continue
+            event_end = ev.end
+            if isinstance(event_end, _date) and not isinstance(event_end, datetime):
+                event_end_dt = datetime.combine(event_end, time.min, tzinfo=dt_util.DEFAULT_TIME_ZONE)
+            else:
+                event_end_dt = event_end
+            if event_end_dt <= now:
+                continue  # przeszly event
+            if next_event is None:
+                next_event = ev
+                continue
+            # Zachowaj najwczesniejszy z przyszlych (lista bywa posortowana,
+            # ale nie zakladamy tego na sztywno).
+            current_start = next_event.start
+            new_start = ev.start
+            current_dt = (
+                datetime.combine(current_start, time.min, tzinfo=dt_util.DEFAULT_TIME_ZONE)
+                if isinstance(current_start, _date) and not isinstance(current_start, datetime)
+                else current_start
+            )
+            new_dt = (
+                datetime.combine(new_start, time.min, tzinfo=dt_util.DEFAULT_TIME_ZONE)
+                if isinstance(new_start, _date) and not isinstance(new_start, datetime)
+                else new_start
+            )
+            if new_dt < current_dt:
+                next_event = ev
+        return next_event
 
     async def async_get_events(
         self,
