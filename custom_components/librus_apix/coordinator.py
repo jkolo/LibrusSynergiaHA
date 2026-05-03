@@ -7,7 +7,7 @@ import logging
 import random
 from collections import OrderedDict
 from collections.abc import Awaitable, Callable
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, time, timedelta
 from typing import TYPE_CHECKING, Any
 
 from homeassistant.config_entries import ConfigEntry
@@ -18,7 +18,24 @@ from homeassistant.helpers.event import async_call_later
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.util import dt as dt_util
 
-from .const import DOMAIN, SCAN_INTERVAL
+from .const import (
+    DEFAULT_BASE_MINUTES,
+    DEFAULT_HUMANIZE,
+    DEFAULT_JITTER,
+    DEFAULT_OFF_SCHOOL_MULTIPLIER,
+    DEFAULT_QUIET_END,
+    DEFAULT_QUIET_HOURS_ENABLED,
+    DEFAULT_QUIET_START,
+    DOMAIN,
+    OPT_BASE_MINUTES,
+    OPT_HUMANIZE,
+    OPT_JITTER,
+    OPT_OFF_SCHOOL_MULTIPLIER,
+    OPT_QUIET_END,
+    OPT_QUIET_HOURS_ENABLED,
+    OPT_QUIET_START,
+    SCAN_INTERVAL,
+)
 from .humanize import (
     is_school_day,
     jitter_pause_seconds,
@@ -173,6 +190,34 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     def _clear_issue(self, kind: str) -> None:
         ir.async_delete_issue(self.hass, DOMAIN, self._issue_id(kind))
 
+    # ---------- Options helpers (PR 6) ----------
+
+    def _opts(self) -> dict[str, Any]:
+        """Return current entry.options dict (empty when no entry attached)."""
+        if self.config_entry is None:
+            return {}
+        return dict(self.config_entry.options)
+
+    def _opt_humanize(self) -> bool:
+        return self._opts().get(OPT_HUMANIZE, DEFAULT_HUMANIZE)
+
+    def _opt_quiet_hours(self) -> tuple[time, time] | None:
+        opts = self._opts()
+        if not opts.get(OPT_QUIET_HOURS_ENABLED, DEFAULT_QUIET_HOURS_ENABLED):
+            return None
+        try:
+            start = time.fromisoformat(
+                opts.get(OPT_QUIET_START, DEFAULT_QUIET_START)
+            )
+            end = time.fromisoformat(opts.get(OPT_QUIET_END, DEFAULT_QUIET_END))
+        except ValueError:
+            _LOGGER.warning(
+                "Invalid quiet_hours config — falling back to defaults"
+            )
+            start = time.fromisoformat(DEFAULT_QUIET_START)
+            end = time.fromisoformat(DEFAULT_QUIET_END)
+        return (start, end)
+
     @callback
     def schedule_next_refresh(self) -> None:
         """Schedule the next refresh through async_call_later.
@@ -186,20 +231,38 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._unsub_next = None
 
         now = dt_util.now()
-        schedule = (self.data or {}).get("schedule") or []
-        school_day_now = is_school_day(now.date(), schedule)
+        opts = self._opts()
+        humanize = self._opt_humanize()
+        if humanize:
+            schedule = (self.data or {}).get("schedule") or []
+            school_day_now = is_school_day(now.date(), schedule)
+            quiet = self._opt_quiet_hours()
+            multiplier = opts.get(
+                OPT_OFF_SCHOOL_MULTIPLIER, DEFAULT_OFF_SCHOOL_MULTIPLIER
+            )
+            jitter = opts.get(OPT_JITTER, DEFAULT_JITTER)
+        else:
+            # Legacy mode — fixed cadence, no jitter, no quiet hours, no
+            # off-school slowdown. Useful for debugging or when the user
+            # explicitly wants predictable behaviour.
+            school_day_now = True
+            quiet = None
+            multiplier = 1.0
+            jitter = 0.0
+
+        base = opts.get(OPT_BASE_MINUTES, DEFAULT_BASE_MINUTES)
         delay = next_run_delay(
             self._rng,
-            base_minutes=_DEFAULT_BASE_MINUTES,
-            jitter=_DEFAULT_JITTER,
-            quiet_hours=None,
+            base_minutes=float(base),
+            jitter=jitter,
+            quiet_hours=quiet,
             is_school_day_now=school_day_now,
-            off_school_multiplier=_DEFAULT_OFF_SCHOOL_MULTIPLIER,
+            off_school_multiplier=multiplier,
             now=now,
         )
         _LOGGER.debug(
-            "Next Librus refresh scheduled in %.1f s (school_day=%s)",
-            delay, school_day_now,
+            "Next Librus refresh in %.1f s (humanize=%s, school_day=%s)",
+            delay, humanize, school_day_now,
         )
         self._unsub_next = async_call_later(
             self.hass, delay, self._scheduled_refresh
@@ -253,12 +316,19 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     weeks_ahead=4
                 ),
             }
-            order = random_endpoint_order(self._rng, list(fetchers))
-            _LOGGER.debug("Refresh fetch order: %s", order)
+            humanize = self._opt_humanize()
+            order = (
+                random_endpoint_order(self._rng, list(fetchers))
+                if humanize
+                else list(fetchers)
+            )
+            _LOGGER.debug(
+                "Refresh fetch order (humanize=%s): %s", humanize, order
+            )
             results: dict[str, Any] = {}
             for i, name in enumerate(order):
                 results[name] = await fetchers[name]()
-                if i < len(order) - 1:
+                if humanize and i < len(order) - 1:
                     pause = jitter_pause_seconds(self._rng)
                     _LOGGER.debug(
                         "Pause %.2fs before next fetch after %s", pause, name
