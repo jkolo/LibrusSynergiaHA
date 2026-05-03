@@ -32,10 +32,13 @@ PARALLEL_UPDATES = 0  # All entities read from coordinator, no per-entity I/O.
 # ---------------------------------------------------------------------------
 
 
-def _srednia_ocen(oceny: list[dict]) -> float | None:
-    """Oblicz srednia ocen z listy ocen."""
-    wartosci: list[float] = []
-    for g in oceny:
+def _grade_average(grades: list[dict]) -> float | None:
+    """Compute the numeric average of Polish-style grades (e.g. '4+', '5-').
+
+    Plus modifier adds 0.5; minus subtracts 0.25. Invalid entries are skipped.
+    """
+    values: list[float] = []
+    for g in grades:
         grade_str = g.get("ocena", "")
         try:
             base = float(grade_str[0])
@@ -44,10 +47,10 @@ def _srednia_ocen(oceny: list[dict]) -> float | None:
                     base += 0.5
                 elif "-" in grade_str:
                     base -= 0.25
-            wartosci.append(base)
+            values.append(base)
         except (ValueError, IndexError):
             continue
-    return round(sum(wartosci) / len(wartosci), 2) if wartosci else None
+    return round(sum(values) / len(values), 2) if values else None
 
 
 # ---------------------------------------------------------------------------
@@ -78,56 +81,57 @@ def _val_lucky(data: dict[str, Any]) -> StateType:
     return info.lucky_number if info else None
 
 
-def _val_oceny(data: dict[str, Any]) -> StateType:
-    return len(data.get("oceny", []))
+def _val_grades_count(data: dict[str, Any]) -> StateType:
+    return len(data.get("grades", []))
 
 
-def _attrs_oceny(data: dict[str, Any]) -> dict[str, Any]:
-    oceny_wg_przedmiotu = data.get("oceny_wg_przedmiotu", {})
-    sa_nowe = any(
+def _attrs_grades(data: dict[str, Any]) -> dict[str, Any]:
+    grades_by_subject = data.get("grades_by_subject", {})
+    has_new = any(
         g["jest_nowa"]
-        for grades in oceny_wg_przedmiotu.values()
-        for g in grades
+        for subject_grades in grades_by_subject.values()
+        for g in subject_grades
     )
     return {
-        "oceny_wg_przedmiotu": oceny_wg_przedmiotu,
-        "liczba_ocen": len(data.get("oceny", [])),
-        "liczba_przedmiotow": len(oceny_wg_przedmiotu),
-        "sa_nowe_oceny": sa_nowe,
-        "semestr": data.get("semestr_biezacy"),
+        # Polish keys = public API; renamed in EPIC 9 (BREAKING).
+        "oceny_wg_przedmiotu": grades_by_subject,
+        "liczba_ocen": len(data.get("grades", [])),
+        "liczba_przedmiotow": len(grades_by_subject),
+        "sa_nowe_oceny": has_new,
+        "semestr": data.get("current_semester"),
     }
 
 
-def _val_srednia_ocen(data: dict[str, Any]) -> StateType:
-    wszystkie = [
+def _val_overall_average(data: dict[str, Any]) -> StateType:
+    all_grades = [
         g
-        for oceny in data.get("oceny_wg_przedmiotu", {}).values()
-        for g in oceny
+        for subject_grades in data.get("grades_by_subject", {}).values()
+        for g in subject_grades
     ]
-    return _srednia_ocen(wszystkie)
+    return _grade_average(all_grades)
 
 
-def _attrs_srednia_ocen(data: dict[str, Any]) -> dict[str, Any]:
-    srednie_przedmiotow = {
-        subject: _srednia_ocen(oceny)
-        for subject, oceny in data.get("oceny_wg_przedmiotu", {}).items()
-        if _srednia_ocen(oceny) is not None
+def _attrs_overall_average(data: dict[str, Any]) -> dict[str, Any]:
+    averages_by_subject = {
+        subject: _grade_average(subject_grades)
+        for subject, subject_grades in data.get("grades_by_subject", {}).items()
+        if _grade_average(subject_grades) is not None
     }
     return {
-        "srednie_wg_przedmiotow": srednie_przedmiotow,
-        "semestr": data.get("semestr_biezacy"),
+        "srednie_wg_przedmiotow": averages_by_subject,
+        "semestr": data.get("current_semester"),
     }
 
 
-def _val_wiadomosci(data: dict[str, Any]) -> StateType:
-    msgs = data.get("wiadomosci", [])
+def _val_unread_count(data: dict[str, Any]) -> StateType:
+    msgs = data.get("messages", [])
     return sum(1 for m in msgs if m.get("unread", False))
 
 
-def _attrs_wiadomosci(data: dict[str, Any]) -> dict[str, Any]:
-    # Pelna lista (do 10) zeby liczniki byly spojne z native_value;
-    # widok "wiadomosci" ograniczamy do 5.
-    all_msgs = data.get("wiadomosci", [])
+def _attrs_messages(data: dict[str, Any]) -> dict[str, Any]:
+    # Full list (up to 10) for consistent counters with native_value;
+    # the displayed "wiadomosci" list is limited to 5.
+    all_msgs = data.get("messages", [])
     return {
         "wiadomosci": [
             {
@@ -145,21 +149,21 @@ def _attrs_wiadomosci(data: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _val_zapowiedzi(data: dict[str, Any]) -> StateType:
-    """Liczba nadchodzacych sprawdzianow w oknie 14 dni."""
-    zapowiedzi = data.get("zapowiedzi", []) or []
-    return sum(1 for z in zapowiedzi if z.get("days_until", 99) <= 14)
+def _val_upcoming_exams_count(data: dict[str, Any]) -> StateType:
+    """Number of upcoming exams within a 14-day window."""
+    exams = data.get("upcoming_exams", []) or []
+    return sum(1 for e in exams if e.get("days_until", 99) <= 14)
 
 
-def _attrs_zapowiedzi(data: dict[str, Any]) -> dict[str, Any]:
-    zapowiedzi = data.get("zapowiedzi", []) or []
-    next_event = zapowiedzi[0] if zapowiedzi else None
+def _attrs_upcoming_exams(data: dict[str, Any]) -> dict[str, Any]:
+    exams = data.get("upcoming_exams", []) or []
+    next_event = exams[0] if exams else None
     return {
-        "zapowiedzi": zapowiedzi,
-        "liczba_w_3_dni": sum(1 for z in zapowiedzi if z.get("days_until", 99) <= 3),
-        "liczba_w_7_dni": sum(1 for z in zapowiedzi if z.get("days_until", 99) <= 7),
-        "liczba_w_14_dni": sum(1 for z in zapowiedzi if z.get("days_until", 99) <= 14),
-        "liczba_lacznie": len(zapowiedzi),
+        "zapowiedzi": exams,
+        "liczba_w_3_dni": sum(1 for e in exams if e.get("days_until", 99) <= 3),
+        "liczba_w_7_dni": sum(1 for e in exams if e.get("days_until", 99) <= 7),
+        "liczba_w_14_dni": sum(1 for e in exams if e.get("days_until", 99) <= 14),
+        "liczba_lacznie": len(exams),
         "najblizsza_data": next_event["date"] if next_event else None,
         "najblizszy_przedmiot": next_event["subject"] if next_event else None,
         "najblizszy_tytul": next_event["title"] if next_event else None,
@@ -203,31 +207,31 @@ SENSORS: tuple[LibrusSensorEntityDescription, ...] = (
         key="oceny",
         name="Oceny",
         icon="mdi:school",
-        value_fn=_val_oceny,
-        attrs_fn=_attrs_oceny,
+        value_fn=_val_grades_count,
+        attrs_fn=_attrs_grades,
     ),
     LibrusSensorEntityDescription(
         key="srednia_ocen",
         name="Srednia ocen",
         icon="mdi:chart-line",
         state_class=SensorStateClass.MEASUREMENT,
-        value_fn=_val_srednia_ocen,
-        attrs_fn=_attrs_srednia_ocen,
+        value_fn=_val_overall_average,
+        attrs_fn=_attrs_overall_average,
     ),
     LibrusSensorEntityDescription(
         key="wiadomosci",
         name="Wiadomosci",
         icon="mdi:message-text",
-        value_fn=_val_wiadomosci,
-        attrs_fn=_attrs_wiadomosci,
+        value_fn=_val_unread_count,
+        attrs_fn=_attrs_messages,
     ),
     LibrusSensorEntityDescription(
         key="zapowiedzi",
         name="Zapowiedzi",
         icon="mdi:calendar-alert",
         state_class=SensorStateClass.MEASUREMENT,
-        value_fn=_val_zapowiedzi,
-        attrs_fn=_attrs_zapowiedzi,
+        value_fn=_val_upcoming_exams_count,
+        attrs_fn=_attrs_upcoming_exams,
     ),
 )
 
@@ -267,8 +271,8 @@ class LibrusSensor(LibrusBaseEntity, SensorEntity):
         return attrs_fn(self._data())
 
 
-class LibrusPrzedmiotSensor(LibrusBaseEntity, SensorEntity):
-    """Czujnik z ocenami dla konkretnego przedmiotu."""
+class LibrusSubjectGradesSensor(LibrusBaseEntity, SensorEntity):
+    """Sensor exposing grades for a single subject."""
 
     _attr_icon = "mdi:book-open-variant"
 
@@ -278,7 +282,7 @@ class LibrusPrzedmiotSensor(LibrusBaseEntity, SensorEntity):
         subject: str,
         config_entry: ConfigEntry,
     ) -> None:
-        """Inicjalizacja."""
+        """Initialize the per-subject grades sensor."""
         super().__init__(coordinator, config_entry)
         self._subject = subject
         safe_name = slugify(subject)
@@ -287,45 +291,46 @@ class LibrusPrzedmiotSensor(LibrusBaseEntity, SensorEntity):
 
     @property
     def native_value(self) -> int | None:
-        # State HA jest ograniczony do 255 znakow - przy duzej liczbie ocen
-        # zlaczona lista by sie ucinala. Trzymamy liczbe ocen jako state,
-        # pelna lista jest w atrybucie "lista_ocen".
-        oceny = self._data().get("oceny_wg_przedmiotu", {}).get(self._subject, [])
-        return len(oceny) if oceny else None
+        # HA state is capped at 255 characters; for many grades the joined
+        # list would truncate. We keep the grade count as state and the
+        # full list in the "lista_ocen" attribute.
+        grades = self._data().get("grades_by_subject", {}).get(self._subject, [])
+        return len(grades) if grades else None
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
-        oceny = self._data().get("oceny_wg_przedmiotu", {}).get(self._subject, [])
-        if not oceny:
+        grades = self._data().get("grades_by_subject", {}).get(self._subject, [])
+        if not grades:
             return {}
 
-        srednia = _srednia_ocen(oceny)
+        average = _grade_average(grades)
 
-        # Najnowsza ocena wg daty
-        najnowsza: dict | None = None
-        najnowsza_data: date | None = None
-        for g in oceny:
+        # Latest grade by date.
+        latest: dict | None = None
+        latest_date: date | None = None
+        for g in grades:
             for fmt in ("%d.%m.%Y", "%Y-%m-%d"):
                 try:
                     d = datetime.strptime(g["data"].strip(), fmt).date()
-                    if najnowsza_data is None or d > najnowsza_data:
-                        najnowsza_data = d
-                        najnowsza = g
+                    if latest_date is None or d > latest_date:
+                        latest_date = d
+                        latest = g
                     break
                 except ValueError:
                     continue
 
+        # Polish keys = public API; renamed in EPIC 9 (BREAKING).
         return {
-            "oceny": oceny,
-            "lista_ocen": ", ".join(g["ocena"] for g in oceny),
-            "srednia": srednia,
-            "najnowsza_ocena": najnowsza,
-            "sa_nowe_oceny": any(g["jest_nowa"] for g in oceny),
+            "oceny": grades,
+            "lista_ocen": ", ".join(g["ocena"] for g in grades),
+            "srednia": average,
+            "najnowsza_ocena": latest,
+            "sa_nowe_oceny": any(g["jest_nowa"] for g in grades),
         }
 
 
-class LibrusSredniaPrzedmiotuSensor(LibrusBaseEntity, SensorEntity):
-    """Czujnik ze srednia ocen dla konkretnego przedmiotu (do wykresu)."""
+class LibrusSubjectAverageSensor(LibrusBaseEntity, SensorEntity):
+    """Sensor exposing the numeric average for a single subject (for charts)."""
 
     _attr_icon = "mdi:chart-bar"
     _attr_state_class = SensorStateClass.MEASUREMENT
@@ -336,7 +341,7 @@ class LibrusSredniaPrzedmiotuSensor(LibrusBaseEntity, SensorEntity):
         subject: str,
         config_entry: ConfigEntry,
     ) -> None:
-        """Inicjalizacja."""
+        """Initialize the per-subject average sensor."""
         super().__init__(coordinator, config_entry)
         self._subject = subject
         safe_name = slugify(subject)
@@ -345,16 +350,16 @@ class LibrusSredniaPrzedmiotuSensor(LibrusBaseEntity, SensorEntity):
 
     @property
     def native_value(self) -> float | None:
-        oceny = self._data().get("oceny_wg_przedmiotu", {}).get(self._subject, [])
-        return _srednia_ocen(oceny)
+        grades = self._data().get("grades_by_subject", {}).get(self._subject, [])
+        return _grade_average(grades)
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
-        oceny = self._data().get("oceny_wg_przedmiotu", {}).get(self._subject, [])
+        grades = self._data().get("grades_by_subject", {}).get(self._subject, [])
         return {
             "przedmiot": self._subject,
-            "lista_ocen": ", ".join(g["ocena"] for g in oceny),
-            "liczba_ocen": len(oceny),
+            "lista_ocen": ", ".join(g["ocena"] for g in grades),
+            "liczba_ocen": len(grades),
         }
 
 
@@ -377,16 +382,16 @@ async def async_setup_entry(
     ]
     async_add_entities(static_entities)
 
-    # Czujniki per przedmiot — sledzimy pojawiajace sie nowe przedmioty.
-    # Pierwszy refresh juz sie wykonal, wiec stala lista przedmiotow jest
-    # natychmiast dostepna; coordinator listener wylapuje nowe wpisy
-    # pojawiajace sie mid-semester (rule Gold dynamic-devices).
+    # Per-subject sensors — track newly appearing subjects. The first refresh
+    # already ran, so the initial subject list is immediately available; the
+    # coordinator listener picks up entries added mid-semester (Gold rule
+    # dynamic-devices).
     known_subjects: set[str] = set()
 
     @callback
     def _add_subject_sensors() -> None:
         current_subjects = set(
-            (coordinator.data or {}).get("oceny_wg_przedmiotu", {}).keys()
+            (coordinator.data or {}).get("grades_by_subject", {}).keys()
         )
         new_subjects = current_subjects - known_subjects
         if not new_subjects:
@@ -395,13 +400,13 @@ async def async_setup_entry(
         new_entities: list[SensorEntity] = []
         for subject in new_subjects:
             new_entities.append(
-                LibrusPrzedmiotSensor(coordinator, subject, config_entry)
+                LibrusSubjectGradesSensor(coordinator, subject, config_entry)
             )
             new_entities.append(
-                LibrusSredniaPrzedmiotuSensor(coordinator, subject, config_entry)
+                LibrusSubjectAverageSensor(coordinator, subject, config_entry)
             )
         async_add_entities(new_entities)
 
-    # Pierwsze dodanie + listener na kazdy kolejny refresh.
+    # Initial add + listener for every subsequent refresh.
     _add_subject_sensors()
     config_entry.async_on_unload(coordinator.async_add_listener(_add_subject_sensors))
