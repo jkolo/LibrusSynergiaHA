@@ -61,3 +61,66 @@ def test_default_constructor_works_without_rng():
     client = LibrusApiClient("u", "p")
     assert client._user_agent in USER_AGENTS
     assert client._headers["User-Agent"] == client._user_agent
+
+
+async def test_attendance_fetcher_applies_headers():
+    """`async_get_attendance` patchuje `urls.HEADERS` przez `_with_retry`.
+
+    Zabezpiecza nas przed bypassem _apply_headers dla nowych fetcherów —
+    jeśli ktoś by je dodał omijając `_with_retry`, nie patchowałyby UA
+    i ujawniły bot.
+    """
+    import random
+
+    from unittest.mock import patch
+    client = LibrusApiClient("u", "p", rng=random.Random(42))
+
+    # Pre-seed headers with a sentinel — verify _apply_headers replaced it.
+    librus_urls.HEADERS.clear()
+    librus_urls.HEADERS["User-Agent"] = "SENTINEL"
+
+    # Mock _with_retry to capture whether _apply_headers was called via the
+    # real path. Easiest: spy _apply_headers directly.
+    with patch.object(client, "_apply_headers", wraps=client._apply_headers) as spy:
+        # Stub authenticate so the body of _with_retry runs to executor.
+        async def _ok():
+            client._client = object()  # any truthy non-None
+            client._token = object()
+            return True
+
+        with patch.object(client, "async_authenticate", side_effect=_ok):
+            # get_attendance patched at module level — return empty list.
+            with patch(
+                "custom_components.librus_apix.get_attendance", return_value=[]
+            ):
+                await client.async_get_attendance()
+
+    assert spy.called, "_apply_headers should be invoked before executor call"
+    assert librus_urls.HEADERS["User-Agent"] != "SENTINEL"
+    assert librus_urls.HEADERS["User-Agent"] in USER_AGENTS
+
+
+async def test_announcements_fetcher_applies_headers():
+    """`async_get_announcements` analogicznie."""
+    import random
+
+    from unittest.mock import patch
+    client = LibrusApiClient("u", "p", rng=random.Random(42))
+
+    librus_urls.HEADERS.clear()
+    librus_urls.HEADERS["User-Agent"] = "SENTINEL"
+
+    with patch.object(client, "_apply_headers", wraps=client._apply_headers) as spy:
+        async def _ok():
+            client._client = object()
+            client._token = object()
+            return True
+
+        with patch.object(client, "async_authenticate", side_effect=_ok):
+            with patch(
+                "custom_components.librus_apix.get_announcements", return_value=[]
+            ):
+                await client.async_get_announcements()
+
+    assert spy.called
+    assert librus_urls.HEADERS["User-Agent"] != "SENTINEL"

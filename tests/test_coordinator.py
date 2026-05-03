@@ -49,6 +49,8 @@ def fake_client(mock_student_info):
     client.async_get_messages = AsyncMock(return_value=[])
     client.async_get_schedule_events = AsyncMock(return_value=[])
     client.async_get_timetable_events = AsyncMock(return_value=[])
+    client.async_get_attendance = AsyncMock(return_value=[])
+    client.async_get_announcements = AsyncMock(return_value=[])
     return client
 
 
@@ -168,6 +170,8 @@ async def test_repair_issue_lib_outdated_after_threshold(
     fake_client.async_get_messages = AsyncMock(return_value=None)
     fake_client.async_get_schedule_events = AsyncMock(return_value=None)
     fake_client.async_get_timetable_events = AsyncMock(return_value=None)
+    fake_client.async_get_attendance = AsyncMock(return_value=None)
+    fake_client.async_get_announcements = AsyncMock(return_value=None)
 
     issue_id = coordinator._issue_id(ISSUE_LIB_OUTDATED)
     registry = ir.async_get(hass)
@@ -204,6 +208,8 @@ async def test_repair_issue_lib_outdated_clears_on_recovery(
     fake_client.async_get_messages = AsyncMock(return_value=None)
     fake_client.async_get_schedule_events = AsyncMock(return_value=None)
     fake_client.async_get_timetable_events = AsyncMock(return_value=None)
+    fake_client.async_get_attendance = AsyncMock(return_value=None)
+    fake_client.async_get_announcements = AsyncMock(return_value=None)
     for _ in range(5):
         await coordinator.async_refresh()
         await hass.async_block_till_done()
@@ -254,18 +260,23 @@ async def test_random_order_uses_injected_rng(
     fake_client.async_get_timetable_events = await _record(
         "timetable", fake_client.async_get_timetable_events
     )
+    fake_client.async_get_attendance = await _record(
+        "attendance", fake_client.async_get_attendance
+    )
+    fake_client.async_get_announcements = await _record(
+        "announcements", fake_client.async_get_announcements
+    )
 
     await coordinator.async_refresh()
     await hass.async_block_till_done()
 
+    natural = ["student_info", "grades", "messages", "schedule", "timetable",
+               "attendance", "announcements"]
     # Each fetcher called exactly once.
-    assert sorted(call_order) == sorted(
-        ["student_info", "grades", "messages", "schedule", "timetable"]
-    )
-    # Order is NOT the natural dict order (would be the listing above) —
-    # the shuffle should produce something different. Lock-in: with seed 42,
-    # the order is deterministic and we just check that *some* shuffle happened.
-    assert call_order != ["student_info", "grades", "messages", "schedule", "timetable"]
+    assert sorted(call_order) == sorted(natural)
+    # Order is NOT the natural dict order — the shuffle should produce
+    # something different.
+    assert call_order != natural
 
 
 async def test_pause_invoked_between_endpoints(hass: HomeAssistant, fake_client):
@@ -296,8 +307,8 @@ async def test_pause_invoked_between_endpoints(hass: HomeAssistant, fake_client)
         await coordinator.async_refresh()
         await hass.async_block_till_done()
 
-    # 5 fetcherow → 4 pauzy między nimi.
-    assert len(pause_seconds) == 4
+    # 7 fetcherow → 6 pauz między nimi.
+    assert len(pause_seconds) == 6
 
 
 async def test_schedule_next_refresh_uses_async_call_later(

@@ -15,6 +15,8 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_PASSWORD, CONF_USERNAME
 from homeassistant.core import HomeAssistant
 from librus_apix import urls as librus_urls
+from librus_apix.announcements import get_announcements
+from librus_apix.attendance import get_attendance, get_attendance_frequency
 from librus_apix.client import Client, new_client
 from librus_apix.exceptions import TokenError
 from librus_apix.grades import get_grades
@@ -225,11 +227,23 @@ class LibrusApiClient:
                     for grade in grades_list:
                         if grade.semester != current_sem:
                             continue
+                        # `value` is a property — może rzucić ValueError dla
+                        # zachowaniowych ocen typu "A+". Cache w try by nie
+                        # wywalić całego fetcha.
+                        try:
+                            value = grade.value
+                        except ValueError:
+                            value = None
                         all_grades.append({
                             "subject": subject,
                             "grade": grade.grade,
+                            "value": value,
+                            "counts": grade.counts,
+                            "weight": grade.weight,
                             "date": grade.date,
                             "category": grade.category,
+                            "description": getattr(grade, "desc", ""),
+                            "title": getattr(grade, "title", ""),
                             "teacher": getattr(grade, "teacher", ""),
                             "semester": grade.semester,
                             "type": "numeric",
@@ -247,8 +261,13 @@ class LibrusApiClient:
                             all_grades.append({
                                 "subject": subject,
                                 "grade": desc_grade.grade,
+                                "value": None,         # Descriptive: brak property value.
+                                "counts": False,       # Z definicji nie liczy się do średniej.
+                                "weight": 0,
                                 "date": desc_grade.date,
                                 "category": desc.split("\n")[0] if desc else "",
+                                "description": desc,
+                                "title": getattr(desc_grade, "title", ""),
                                 "teacher": getattr(desc_grade, "teacher", ""),
                                 "semester": desc_grade.semester,
                                 "type": "descriptive",
@@ -469,6 +488,76 @@ class LibrusApiClient:
             return lessons
 
         return await self._with_retry("timetable", _work)
+
+    async def async_get_attendance(self) -> list[dict[str, Any]] | None:
+        """Pobierz wszystkie wpisy frekwencji (cały rok szkolny).
+
+        Każdy wpis ma symbol Librusa (`nb`/`sp`/`u`/`zw`/`ob`/`wy`/`k`/`sz`).
+        Płaska lista po obu semestrach + flag-owe pola dla łatwego filtrowania
+        w sensorach (is_absence/is_late/is_unjustified/is_excused).
+        """
+
+        def _work(client: Client) -> list[dict[str, Any]]:
+            per_sem = get_attendance(client, "all")  # List[List[Attendance]]
+            flat: list[dict[str, Any]] = []
+            for sem_list in per_sem:
+                for entry in sem_list:
+                    sym = entry.symbol or ""
+                    flat.append({
+                        "symbol": sym,
+                        "type": entry.type or "",
+                        "date": entry.date or "",
+                        "subject": entry.subject or "",
+                        "teacher": entry.teacher or "",
+                        "period": entry.period,
+                        "topic": entry.topic or "",
+                        "semester": entry.semester,
+                        "excursion": bool(entry.excursion),
+                        "is_present": sym == "ob",
+                        "is_absence": sym in ("nb", "u"),
+                        "is_unjustified": sym == "nb",
+                        "is_excused": sym == "u",
+                        "is_late": sym == "sp",
+                        "is_release": sym == "zw",
+                    })
+            flat.sort(key=lambda e: e["date"])
+            return flat
+
+        return await self._with_retry("attendance", _work)
+
+    async def async_get_attendance_frequency(
+        self,
+    ) -> tuple[float, float, float] | None:
+        """Procent obecności jako (semestr_1, semestr_2, ogółem).
+
+        Tuple of three floats; gdy biblioteka zwraca brak danych — None.
+        """
+
+        def _work(client: Client) -> tuple[float, float, float]:
+            return get_attendance_frequency(client)
+
+        return await self._with_retry("attendance_frequency", _work)
+
+    async def async_get_announcements(self) -> list[dict[str, Any]] | None:
+        """Pobierz ogłoszenia systemowe szkoły.
+
+        Pola: `title`, `author`, `description`, `date`. Lista posortowana
+        chronologicznie (najnowsze pierwsze).
+        """
+
+        def _work(client: Client) -> list[dict[str, Any]]:
+            items = get_announcements(client)
+            return [
+                {
+                    "title": a.title or "",
+                    "author": a.author or "",
+                    "description": a.description or "",
+                    "date": a.date or "",
+                }
+                for a in items
+            ]
+
+        return await self._with_retry("announcements", _work)
 
 
 async def _async_options_updated(hass: HomeAssistant, entry: LibrusConfigEntry) -> None:
