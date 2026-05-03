@@ -248,11 +248,12 @@ class LibrusBaseCalendar(LibrusBaseEntity, CalendarEntity):
 class LibrusScheduleCalendar(LibrusBaseCalendar):
     """Full Librus schedule (terminarz) calendar with tagged summaries."""
 
+    _attr_translation_key = "schedule"
+    _attr_icon = "mdi:calendar-text"
+
     def __init__(self, coordinator, config_entry: ConfigEntry) -> None:
         super().__init__(coordinator, config_entry)
-        self._attr_name = "Terminarz"
         self._attr_unique_id = f"{config_entry.entry_id}_calendar_terminarz"
-        self._attr_icon = "mdi:calendar-text"
 
     def _all_events(self) -> list[dict]:
         return (self.coordinator.data or {}).get("schedule") or []
@@ -264,11 +265,12 @@ class LibrusScheduleCalendar(LibrusBaseCalendar):
 class LibrusTimetableCalendar(LibrusBaseCalendar):
     """Librus timetable (plan lekcji) calendar."""
 
+    _attr_translation_key = "timetable"
+    _attr_icon = "mdi:timetable"
+
     def __init__(self, coordinator, config_entry: ConfigEntry) -> None:
         super().__init__(coordinator, config_entry)
-        self._attr_name = "Plan Lekcji"
         self._attr_unique_id = f"{config_entry.entry_id}_calendar_plan_lekcji"
-        self._attr_icon = "mdi:timetable"
 
     def _all_events(self) -> list[dict]:
         return (self.coordinator.data or {}).get("timetable") or []

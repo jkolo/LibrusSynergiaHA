@@ -1,0 +1,74 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Konfiguracja integracji Librus APIX",
+        "description": "Podaj swoje dane logowania do Librus Synergia",
+        "data": {
+          "username": "Login",
+          "password": "Hasło"
+        }
+      },
+      "reauth_confirm": {
+        "title": "Ponowne uwierzytelnienie Librus APIX",
+        "description": "Twoje hasło do Librus przestało działać dla {username}. Podaj nowe hasło, aby przywrócić integrację.",
+        "data": {
+          "password": "Hasło"
+        }
+      },
+      "reconfigure": {
+        "title": "Rekonfiguracja Librus APIX",
+        "description": "Zmień dane logowania do Librus Synergia.",
+        "data": {
+          "username": "Login",
+          "password": "Hasło"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Nie udało się połączyć z Librus. Sprawdź dane logowania.",
+      "unknown": "Wystąpił nieoczekiwany błąd"
+    },
+    "abort": {
+      "already_configured": "Konto jest już skonfigurowane",
+      "reauth_successful": "Ponowne uwierzytelnienie powiodło się — integracja została przeładowana.",
+      "reconfigure_successful": "Rekonfiguracja zakończona sukcesem — integracja została przeładowana.",
+      "account_mismatch": "Nowy login nie pasuje do tego config entry. Aby użyć innego konta, dodaj je jako nową integrację."
+    }
+  },
+  "entity": {
+    "sensor": {
+      "student_info": {
+        "name": "Informacje o uczniu"
+      },
+      "lucky_number": {
+        "name": "Szczęśliwy numerek"
+      },
+      "grades": {
+        "name": "Oceny"
+      },
+      "overall_average": {
+        "name": "Średnia ocen"
+      },
+      "messages": {
+        "name": "Wiadomości"
+      },
+      "upcoming_exams": {
+        "name": "Zapowiedzi"
+      }
+    },
+    "calendar": {
+      "schedule": {
+        "name": "Terminarz"
+      },
+      "timetable": {
+        "name": "Plan lekcji"
+      }
+    }
+  },
+  "exceptions": {
+    "auth_failed": {
+      "message": "Uwierzytelnianie nie powiodło się — wprowadź hasło ponownie."
+    }
+  }
+}
