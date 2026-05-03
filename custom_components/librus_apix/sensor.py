@@ -64,16 +64,24 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Konfiguracja platformy czujnikow Librus APIX."""
-    client = hass.data[DOMAIN][config_entry.entry_id]
-
-    coordinator = LibrusDataUpdateCoordinator(hass, client)
-    await coordinator.async_config_entry_first_refresh()
+    # Coordinator zostal stworzony w __init__.async_setup_entry — uzywamy go.
+    # Fallback (legacy install): jesli go brak, tworzymy lokalnie.
+    coord_key = f"{config_entry.entry_id}_coordinator"
+    coordinator: LibrusDataUpdateCoordinator
+    if coord_key in hass.data.get(DOMAIN, {}):
+        coordinator = hass.data[DOMAIN][coord_key]
+    else:
+        client = hass.data[DOMAIN][config_entry.entry_id]
+        coordinator = LibrusDataUpdateCoordinator(hass, client)
+        await coordinator.async_config_entry_first_refresh()
+        hass.data[DOMAIN][coord_key] = coordinator
 
     entities: List[SensorEntity] = [
         LibrusUczenSensor(coordinator, config_entry),
         LibrusSzczesliwyNumerekSensor(coordinator, config_entry),
         LibrusOcenySensor(coordinator, config_entry),
         LibrusWiadomosciSensor(coordinator, config_entry),
+        LibrusZapowiedziSensor(coordinator, config_entry),
     ]
 
     # Tworz czujniki per przedmiot na podstawie pierwszego pobrania danych
@@ -89,6 +97,7 @@ async def async_setup_entry(
 
 EVENT_NOWA_WIADOMOSC = f"{DOMAIN}_nowa_wiadomosc"
 EVENT_NOWA_OCENA = f"{DOMAIN}_nowa_ocena"
+EVENT_NOWA_ZAPOWIEDZ = f"{DOMAIN}_nowa_zapowiedz"
 
 
 class LibrusDataUpdateCoordinator(DataUpdateCoordinator):
@@ -99,6 +108,7 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator):
         self.client = client
         self._seen_message_hrefs: set = set()
         self._seen_grade_ids: set = set()
+        self._seen_zapowiedzi_ids: set = set()
         self._first_run: bool = True
         super().__init__(
             hass,
@@ -116,6 +126,17 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator):
             student_info = await self.client.async_get_student_information()
             grades = await self.client.async_get_grades()
             messages = await self.client.async_get_messages(count=10)
+            # Pobierz pelen terminarz (sprawdziany + dni wolne + inne) raz; sensor.zapowiedzi
+            # uzywa tylko exam events, calendar.terminarz uzywa wszystkiego.
+            terminarz_all = await self.client.async_get_schedule_events(
+                months_ahead=2, only_exams=False
+            )
+            zapowiedzi = (
+                [e for e in terminarz_all if e.get("is_exam")]
+                if terminarz_all is not None
+                else None
+            )
+            plan_lekcji = await self.client.async_get_timetable_events(weeks_ahead=4)
 
             if grades is None:
                 # Zachowaj poprzednie dane o ocenach jesli dostepne, wiadomosci zaktualizuj jesli OK
@@ -131,6 +152,21 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator):
                         self._build_wiadomosci(messages)
                         if messages is not None
                         else prev.get("wiadomosci", [])
+                    ),
+                    "zapowiedzi": (
+                        zapowiedzi
+                        if zapowiedzi is not None
+                        else prev.get("zapowiedzi", [])
+                    ),
+                    "terminarz": (
+                        terminarz_all
+                        if terminarz_all is not None
+                        else prev.get("terminarz", [])
+                    ),
+                    "plan_lekcji": (
+                        plan_lekcji
+                        if plan_lekcji is not None
+                        else prev.get("plan_lekcji", [])
                     ),
                 }
 
@@ -151,11 +187,16 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator):
 
             wiadomosci = self._build_wiadomosci(messages)
 
+            zapowiedzi_list = zapowiedzi if zapowiedzi is not None else []
+
             result = {
                 "student_info": student_info,
                 "oceny": grades,
                 "oceny_wg_przedmiotu": oceny_wg_przedmiotu,
                 "wiadomosci": wiadomosci,
+                "zapowiedzi": zapowiedzi_list,
+                "terminarz": terminarz_all if terminarz_all is not None else [],
+                "plan_lekcji": plan_lekcji if plan_lekcji is not None else [],
                 "semestr_biezacy": current_sem,
             }
 
@@ -168,8 +209,12 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator):
                     self._seen_grade_ids.add(
                         (grade["subject"], grade["date"], grade["grade"])
                     )
+                for zap in zapowiedzi_list:
+                    self._seen_zapowiedzi_ids.add(
+                        (zap["date"], zap["subject"], zap["title"])
+                    )
             else:
-                self._fire_events(wiadomosci, grades)
+                self._fire_events(wiadomosci, grades, zapowiedzi_list)
 
             return result
 
@@ -178,8 +223,13 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator):
         except Exception as err:
             raise UpdateFailed(f"Blad komunikacji z API: {err}") from err
 
-    def _fire_events(self, messages: List[Dict], grades: List[Dict]) -> None:
-        """Wyslij zdarzenia HA dla nowych wiadomosci i ocen."""
+    def _fire_events(
+        self,
+        messages: List[Dict],
+        grades: List[Dict],
+        zapowiedzi: Optional[List[Dict]] = None,
+    ) -> None:
+        """Wyslij zdarzenia HA dla nowych wiadomosci, ocen i zapowiedzi."""
         for msg in messages:
             href = msg.get("href", "")
             if href and href not in self._seen_message_hrefs:
@@ -208,6 +258,26 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator):
                         "data": grade["date"],
                         "kategoria": grade["category"],
                         "nauczyciel": grade["teacher"],
+                    },
+                )
+
+        for zap in zapowiedzi or []:
+            zap_id = (zap["date"], zap["subject"], zap["title"])
+            if zap_id not in self._seen_zapowiedzi_ids:
+                self._seen_zapowiedzi_ids.add(zap_id)
+                _LOGGER.debug(
+                    "Nowa zapowiedz: %s %s (%s)",
+                    zap.get("subject"), zap.get("title"), zap.get("date"),
+                )
+                self.hass.bus.fire(
+                    EVENT_NOWA_ZAPOWIEDZ,
+                    {
+                        "tytul": zap.get("title", ""),
+                        "przedmiot": zap.get("subject", ""),
+                        "kategoria": zap.get("category", ""),
+                        "data": zap.get("date", ""),
+                        "godzina": zap.get("hour", ""),
+                        "dni_do": zap.get("days_until", 0),
                     },
                 )
 
@@ -510,4 +580,49 @@ class LibrusWiadomosciSensor(CoordinatorEntity, SensorEntity):
             ],
             "liczba_nieprzeczytanych": sum(1 for m in msgs if m.get("unread", False)),
             "sa_nowe_wiadomosci": any(m.get("jest_nowa", False) for m in msgs),
+        }
+
+
+class LibrusZapowiedziSensor(CoordinatorEntity, SensorEntity):
+    """Czujnik z zapowiedziami sprawdzianow i kartkowek z terminarza."""
+
+    def __init__(
+        self,
+        coordinator: LibrusDataUpdateCoordinator,
+        config_entry: ConfigEntry,
+    ) -> None:
+        """Inicjalizacja."""
+        super().__init__(coordinator)
+        self._config_entry = config_entry
+        self._attr_has_entity_name = False
+        self._attr_name = "Zapowiedzi"
+        self._attr_unique_id = f"{config_entry.entry_id}_zapowiedzi"
+        self._attr_icon = "mdi:calendar-alert"
+        self._attr_state_class = SensorStateClass.MEASUREMENT
+
+    @property
+    def device_info(self) -> Dict[str, Any]:
+        return _device_info(self.coordinator, self._config_entry)
+
+    @property
+    def native_value(self) -> int:
+        """Liczba nadchodzacych sprawdzianow w oknie 14 dni."""
+        zapowiedzi = (self.coordinator.data or {}).get("zapowiedzi", []) or []
+        return sum(1 for z in zapowiedzi if z.get("days_until", 99) <= 14)
+
+    @property
+    def extra_state_attributes(self) -> Dict[str, Any]:
+        zapowiedzi = (self.coordinator.data or {}).get("zapowiedzi", []) or []
+        next_event = zapowiedzi[0] if zapowiedzi else None
+        return {
+            "zapowiedzi": zapowiedzi,
+            "liczba_w_3_dni": sum(1 for z in zapowiedzi if z.get("days_until", 99) <= 3),
+            "liczba_w_7_dni": sum(1 for z in zapowiedzi if z.get("days_until", 99) <= 7),
+            "liczba_w_14_dni": sum(1 for z in zapowiedzi if z.get("days_until", 99) <= 14),
+            "liczba_lacznie": len(zapowiedzi),
+            "najblizsza_data": next_event["date"] if next_event else None,
+            "najblizszy_przedmiot": next_event["subject"] if next_event else None,
+            "najblizszy_tytul": next_event["title"] if next_event else None,
+            "najblizsza_kategoria": next_event["category"] if next_event else None,
+            "najblizsza_dni_do": next_event["days_until"] if next_event else None,
         }
