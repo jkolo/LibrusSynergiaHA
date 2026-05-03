@@ -307,14 +307,19 @@ async def test_schedule_next_refresh_uses_async_call_later(
     import random as _random
     from unittest.mock import patch
 
+    from freezegun import freeze_time
+
     coordinator = LibrusDataUpdateCoordinator(
         hass, fake_client, rng=_random.Random(42)
     )
 
-    with patch(
-        "custom_components.librus_apix.coordinator.async_call_later"
-    ) as call_later:
-        coordinator.schedule_next_refresh()
+    # Freeze on a typical school day (Tuesday) so the off-school multiplier
+    # path doesn't kick in and broaden the expected delay range.
+    with freeze_time("2026-05-12 10:00:00"):
+        with patch(
+            "custom_components.librus_apix.coordinator.async_call_later"
+        ) as call_later:
+            coordinator.schedule_next_refresh()
 
     assert call_later.called
     args = call_later.call_args.args
@@ -323,6 +328,91 @@ async def test_schedule_next_refresh_uses_async_call_later(
     delay = args[1]
     # Default base 120 min × ±25 % jitter → [90, 150] min.
     assert 90 * 60 <= delay <= 150 * 60
+
+
+async def test_schedule_uses_off_school_multiplier_on_saturday(
+    hass: HomeAssistant, fake_client
+):
+    """Sobota + pusty schedule → delay liczony z off_school_multiplier."""
+    import random as _random
+    from datetime import datetime
+    from unittest.mock import patch
+
+    from freezegun import freeze_time
+
+    coordinator = LibrusDataUpdateCoordinator(
+        hass, fake_client, rng=_random.Random(42)
+    )
+
+    # 2026-05-09 is a Saturday — empty schedule fallback to weekend.
+    with freeze_time("2026-05-09 10:00:00"):
+        with patch(
+            "custom_components.librus_apix.coordinator.async_call_later"
+        ) as call_later:
+            coordinator.schedule_next_refresh()
+
+    delay = call_later.call_args.args[1]
+    # Off-school: base 120 × 6 = 720 min ± 25 % → [540, 900] min.
+    assert 540 * 60 <= delay <= 900 * 60
+
+
+async def test_schedule_uses_school_day_when_weekday_no_event(
+    hass: HomeAssistant, fake_client
+):
+    """Wtorek + brak eventu day_off → delay normalny szkolny."""
+    import random as _random
+    from unittest.mock import patch
+
+    from freezegun import freeze_time
+
+    coordinator = LibrusDataUpdateCoordinator(
+        hass, fake_client, rng=_random.Random(42)
+    )
+
+    # 2026-05-12 is a Tuesday.
+    with freeze_time("2026-05-12 10:00:00"):
+        with patch(
+            "custom_components.librus_apix.coordinator.async_call_later"
+        ) as call_later:
+            coordinator.schedule_next_refresh()
+
+    delay = call_later.call_args.args[1]
+    # School day: 120 min ± 25 % → [90, 150] min.
+    assert 90 * 60 <= delay <= 150 * 60
+
+
+async def test_schedule_uses_off_school_when_event_marks_day_off(
+    hass: HomeAssistant, fake_client
+):
+    """Wtorek z eventem is_day_off=True na dzis → off-school multiplier."""
+    import random as _random
+    from unittest.mock import patch
+
+    from freezegun import freeze_time
+
+    coordinator = LibrusDataUpdateCoordinator(
+        hass, fake_client, rng=_random.Random(42)
+    )
+    # Pre-seed coordinator.data with a day-off event for today.
+    coordinator.data = {
+        "schedule": [
+            {
+                "date": "2026-05-12",
+                "is_day_off": True,
+                "title": "Dzień wolny od zajęć",
+                "subject": "",
+            }
+        ]
+    }
+
+    with freeze_time("2026-05-12 10:00:00"):
+        with patch(
+            "custom_components.librus_apix.coordinator.async_call_later"
+        ) as call_later:
+            coordinator.schedule_next_refresh()
+
+    delay = call_later.call_args.args[1]
+    assert 540 * 60 <= delay <= 900 * 60
 
 
 async def test_async_shutdown_cancels_pending_refresh(
