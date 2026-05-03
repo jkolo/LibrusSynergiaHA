@@ -496,7 +496,9 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     "current_semester": current_semester,
                 }
 
-            # Group grades by subject and tag fresh ones.
+            # Group grades by subject and tag fresh ones. Wszystkie nowe
+            # pola (value/weight/description/title/counts) propagowane są
+            # do per-subject sensorow (PR 3) i kalendarza ocen (PR 5).
             grades_by_subject: dict[str, list[dict]] = {}
             for grade in grades:
                 subject = grade["subject"]
@@ -504,10 +506,16 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     grades_by_subject[subject] = []
                 grades_by_subject[subject].append({
                     "grade": grade["grade"],
+                    "value": grade.get("value"),
+                    "counts": grade.get("counts"),
+                    "weight": grade.get("weight"),
                     "date": grade["date"],
                     "category": grade["category"],
+                    "description": grade.get("description", ""),
+                    "title": grade.get("title", ""),
                     "teacher": grade["teacher"],
                     "semester": grade.get("semester"),
+                    "type": grade.get("type", "numeric"),
                     "is_recent": _is_recent(grade["date"]),
                 })
 

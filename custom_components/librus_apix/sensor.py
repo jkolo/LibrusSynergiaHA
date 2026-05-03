@@ -376,6 +376,25 @@ def _attrs_latest_announcement(data: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _grade_details_view(grades: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Build a per-subject grade history with full per-grade context."""
+    return [
+        {
+            "grade": g.get("grade", ""),
+            "value": g.get("value"),
+            "date": g.get("date", ""),
+            "category": g.get("category", ""),
+            "description": g.get("description", ""),
+            "weight": g.get("weight"),
+            "counts": g.get("counts"),
+            "teacher": g.get("teacher", ""),
+            "title": g.get("title", ""),
+            "is_recent": bool(g.get("is_recent", False)),
+        }
+        for g in grades
+    ]
+
+
 def _attrs_latest_grade(data: dict[str, Any]) -> dict[str, Any]:
     grade = _latest_grade_entry(data)
     if not grade:
@@ -615,6 +634,7 @@ class LibrusSubjectGradesSensor(LibrusBaseEntity, SensorEntity):
         return {
             "grades": grades,
             "grade_list": ", ".join(g["grade"] for g in grades),
+            "grade_details": _grade_details_view(grades),
             "average": average,
             "latest_grade": latest,
             "has_new_grades": any(g["is_recent"] for g in grades),
@@ -653,6 +673,7 @@ class LibrusSubjectAverageSensor(LibrusBaseEntity, SensorEntity):
             "subject": self._subject,
             "grade_list": ", ".join(g["grade"] for g in grades),
             "grade_count": len(grades),
+            "grade_details": _grade_details_view(grades),
         }
 
 
