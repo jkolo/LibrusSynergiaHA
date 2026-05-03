@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from dataclasses import dataclass
 from datetime import date as _date, timedelta
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_PASSWORD, CONF_USERNAME
@@ -22,9 +23,28 @@ from librus_apix.timetable import get_timetable
 
 from .const import DOMAIN
 
+if TYPE_CHECKING:
+    from .sensor import LibrusDataUpdateCoordinator
+
 _LOGGER = logging.getLogger(__name__)
 
 PLATFORMS = ["sensor", "calendar"]
+
+
+@dataclass
+class LibrusRuntimeData:
+    """Runtime data stored on the config entry.
+
+    Replaces the legacy hass.data[DOMAIN][entry_id] storage. HA cleans this
+    up automatically when the entry is unloaded, so async_unload_entry just
+    needs to forward the platform unload.
+    """
+
+    client: LibrusApiClient
+    coordinator: LibrusDataUpdateCoordinator
+
+
+type LibrusConfigEntry = ConfigEntry[LibrusRuntimeData]
 
 
 def _current_semester() -> int:
@@ -465,7 +485,7 @@ class LibrusApiClient:
         return None
 
 
-async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+async def async_setup_entry(hass: HomeAssistant, entry: LibrusConfigEntry) -> bool:
     """Set up Librus APIX from a config entry."""
     username = entry.data[CONF_USERNAME]
     password = entry.data[CONF_PASSWORD]
@@ -483,27 +503,19 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             "HA wykona retry automatycznie."
         )
 
-    hass.data.setdefault(DOMAIN, {})
-    hass.data[DOMAIN][entry.entry_id] = client
-
     # Stworz coordinator wczesniej, zeby sensor i calendar uzyly tego samego.
     from .sensor import LibrusDataUpdateCoordinator
+
     coordinator = LibrusDataUpdateCoordinator(hass, client)
     await coordinator.async_config_entry_first_refresh()
-    hass.data[DOMAIN][f"{entry.entry_id}_coordinator"] = coordinator
 
-    # Setup platforms
+    entry.runtime_data = LibrusRuntimeData(client=client, coordinator=coordinator)
+
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
     return True
 
 
-async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    """Unload a config entry."""
-    unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
-
-    if unload_ok:
-        hass.data[DOMAIN].pop(entry.entry_id, None)
-        hass.data[DOMAIN].pop(f"{entry.entry_id}_coordinator", None)
-    
-    return unload_ok
+async def async_unload_entry(hass: HomeAssistant, entry: LibrusConfigEntry) -> bool:
+    """Unload a config entry. runtime_data is cleaned up by HA automatically."""
+    return await hass.config_entries.async_unload_platforms(entry, PLATFORMS)

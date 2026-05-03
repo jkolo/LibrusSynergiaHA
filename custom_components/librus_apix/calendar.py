@@ -43,7 +43,7 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Skonfiguruj calendar entities z config entry."""
-    coordinator = hass.data[DOMAIN][f"{config_entry.entry_id}_coordinator"]
+    coordinator = config_entry.runtime_data.coordinator
     async_add_entities([
         LibrusTerminarzCalendar(coordinator, config_entry),
         LibrusPlanLekcjiCalendar(coordinator, config_entry),
