@@ -31,7 +31,7 @@ def _current_semester() -> int:
     m = date.today().month
     return 1 if m >= 9 else 2
 
-PLATFORMS = ["sensor"]
+PLATFORMS = ["sensor", "calendar"]
 
 CONFIG_SCHEMA = vol.Schema(
     {
@@ -222,16 +222,20 @@ class LibrusApiClient:
             self._reset_auth()
             return None
 
-    async def async_get_schedule_events(self, months_ahead: int = 2):
-        """Pobierz zapowiedzi sprawdzianow/kartkowek z terminarza Librusa.
+    async def async_get_schedule_events(
+        self, months_ahead: int = 2, only_exams: bool = True
+    ):
+        """Pobierz wydarzenia z terminarza Librusa.
 
         Args:
             months_ahead: Ile miesiecy w przod pobrac (1 = tylko biezacy, 2 = + nastepny).
+            only_exams: True = zwroc tylko sprawdziany/kartkowki (default, backwards compat).
+                False = zwroc cały terminarz (sprawdziany, dni wolne, swieta, etc.) z polami
+                `is_exam` i `is_day_off` na kazdym evencie.
 
         Returns:
             Lista dictow z polami: title, subject, category, date (YYYY-MM-DD),
-            hour, day, href, days_until. Filtrowane po slowach kluczowych
-            wskazujacych na sprawdzian/kartkowke.
+            hour, day, href, days_until, is_exam, is_day_off.
         """
         from datetime import date as _date, timedelta
 
@@ -312,13 +316,16 @@ class LibrusApiClient:
                     haystack = f"{title} {category_str} {type_str}"
                     href_lower = (event.href or "").lower()
 
-                    # Wyklucz dni wolne/zajecia odwolane
-                    if any(ex in haystack for ex in exclude_keywords):
-                        continue
-                    if any(frag in href_lower for frag in exclude_href_fragments):
-                        continue
+                    is_day_off = (
+                        any(ex in haystack for ex in exclude_keywords)
+                        or any(frag in href_lower for frag in exclude_href_fragments)
+                    )
+                    is_exam = (
+                        not is_day_off
+                        and any(kw in haystack for kw in exam_keywords)
+                    )
 
-                    if not any(kw in haystack for kw in exam_keywords):
+                    if only_exams and not is_exam:
                         continue
 
                     days_until = (event_date - today).days
@@ -332,6 +339,8 @@ class LibrusApiClient:
                         "lesson_number": event.number,
                         "href": event.href or "",
                         "days_until": days_until,
+                        "is_exam": is_exam,
+                        "is_day_off": is_day_off,
                     })
 
                 # Sortuj po dacie
@@ -380,28 +389,35 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Librus APIX from a config entry."""
     username = entry.data[CONF_USERNAME]
     password = entry.data[CONF_PASSWORD]
-    
+
     client = LibrusApiClient(username, password)
-    
+
     # Test authentication
     if not await client.async_authenticate():
         _LOGGER.error("Failed to authenticate")
         return False
-    
+
     hass.data.setdefault(DOMAIN, {})
     hass.data[DOMAIN][entry.entry_id] = client
-    
+
+    # Stworz coordinator wczesniej, zeby sensor i calendar uzyly tego samego.
+    from .sensor import LibrusDataUpdateCoordinator
+    coordinator = LibrusDataUpdateCoordinator(hass, client)
+    await coordinator.async_config_entry_first_refresh()
+    hass.data[DOMAIN][f"{entry.entry_id}_coordinator"] = coordinator
+
     # Setup platforms
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
-    
+
     return True
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a config entry."""
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
-    
+
     if unload_ok:
-        hass.data[DOMAIN].pop(entry.entry_id)
+        hass.data[DOMAIN].pop(entry.entry_id, None)
+        hass.data[DOMAIN].pop(f"{entry.entry_id}_coordinator", None)
     
     return unload_ok

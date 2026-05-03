@@ -64,10 +64,17 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Konfiguracja platformy czujnikow Librus APIX."""
-    client = hass.data[DOMAIN][config_entry.entry_id]
-
-    coordinator = LibrusDataUpdateCoordinator(hass, client)
-    await coordinator.async_config_entry_first_refresh()
+    # Coordinator zostal stworzony w __init__.async_setup_entry — uzywamy go.
+    # Fallback (legacy install): jesli go brak, tworzymy lokalnie.
+    coord_key = f"{config_entry.entry_id}_coordinator"
+    coordinator: LibrusDataUpdateCoordinator
+    if coord_key in hass.data.get(DOMAIN, {}):
+        coordinator = hass.data[DOMAIN][coord_key]
+    else:
+        client = hass.data[DOMAIN][config_entry.entry_id]
+        coordinator = LibrusDataUpdateCoordinator(hass, client)
+        await coordinator.async_config_entry_first_refresh()
+        hass.data[DOMAIN][coord_key] = coordinator
 
     entities: List[SensorEntity] = [
         LibrusUczenSensor(coordinator, config_entry),
@@ -119,7 +126,16 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator):
             student_info = await self.client.async_get_student_information()
             grades = await self.client.async_get_grades()
             messages = await self.client.async_get_messages(count=10)
-            zapowiedzi = await self.client.async_get_schedule_events(months_ahead=2)
+            # Pobierz pelen terminarz (sprawdziany + dni wolne + inne) raz; sensor.zapowiedzi
+            # uzywa tylko exam events, calendar.terminarz uzywa wszystkiego.
+            terminarz_all = await self.client.async_get_schedule_events(
+                months_ahead=2, only_exams=False
+            )
+            zapowiedzi = (
+                [e for e in terminarz_all if e.get("is_exam")]
+                if terminarz_all is not None
+                else None
+            )
 
             if grades is None:
                 # Zachowaj poprzednie dane o ocenach jesli dostepne, wiadomosci zaktualizuj jesli OK
@@ -140,6 +156,11 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator):
                         zapowiedzi
                         if zapowiedzi is not None
                         else prev.get("zapowiedzi", [])
+                    ),
+                    "terminarz": (
+                        terminarz_all
+                        if terminarz_all is not None
+                        else prev.get("terminarz", [])
                     ),
                 }
 
@@ -168,6 +189,7 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator):
                 "oceny_wg_przedmiotu": oceny_wg_przedmiotu,
                 "wiadomosci": wiadomosci,
                 "zapowiedzi": zapowiedzi_list,
+                "terminarz": terminarz_all if terminarz_all is not None else [],
                 "semestr_biezacy": current_sem,
             }
 
