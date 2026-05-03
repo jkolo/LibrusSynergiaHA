@@ -23,6 +23,8 @@ from .const import DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
 
+PARALLEL_UPDATES = 0  # All entities read from coordinator, no per-entity I/O.
+
 
 # Mapowanie event_type → (tag, emoji) dla terminarza
 EVENT_TYPE_TAGS = {
