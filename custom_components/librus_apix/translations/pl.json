@@ -72,6 +72,30 @@
       },
       "upcoming_exams": {
         "name": "Zapowiedzi"
+      },
+      "latest_grade": {
+        "name": "Ostatnia ocena"
+      },
+      "latest_message": {
+        "name": "Ostatnia wiadomość"
+      },
+      "next_exam": {
+        "name": "Najbliższy sprawdzian"
+      },
+      "attendance_frequency": {
+        "name": "Frekwencja"
+      },
+      "absences": {
+        "name": "Nieobecności"
+      },
+      "latest_absence": {
+        "name": "Ostatnia nieobecność"
+      },
+      "announcements": {
+        "name": "Ogłoszenia"
+      },
+      "latest_announcement": {
+        "name": "Ostatnie ogłoszenie"
       }
     },
     "calendar": {

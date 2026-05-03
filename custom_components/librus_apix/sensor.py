@@ -157,18 +157,241 @@ def _val_upcoming_exams_count(data: dict[str, Any]) -> StateType:
 
 def _attrs_upcoming_exams(data: dict[str, Any]) -> dict[str, Any]:
     exams = data.get("upcoming_exams", []) or []
-    next_event = exams[0] if exams else None
     return {
         "exams": exams,
         "count_in_3_days": sum(1 for e in exams if e.get("days_until", 99) <= 3),
         "count_in_7_days": sum(1 for e in exams if e.get("days_until", 99) <= 7),
         "count_in_14_days": sum(1 for e in exams if e.get("days_until", 99) <= 14),
         "total_count": len(exams),
-        "next_date": next_event["date"] if next_event else None,
-        "next_subject": next_event["subject"] if next_event else None,
-        "next_title": next_event["title"] if next_event else None,
-        "next_category": next_event["category"] if next_event else None,
-        "next_days_until": next_event["days_until"] if next_event else None,
+    }
+
+
+def _parse_grade_date(date_str: str) -> date | None:
+    """Parse a Librus date string in either ISO or DD.MM.YYYY format."""
+    if not date_str:
+        return None
+    for fmt in ("%Y-%m-%d", "%d.%m.%Y"):
+        try:
+            return datetime.strptime(date_str.strip(), fmt).date()
+        except ValueError:
+            continue
+    return None
+
+
+def _latest_grade_entry(data: dict[str, Any]) -> dict[str, Any] | None:
+    """Return the grade dict with the latest parseable date, or None."""
+    grades = data.get("grades") or []
+    latest: dict[str, Any] | None = None
+    latest_date: date | None = None
+    for grade in grades:
+        d = _parse_grade_date(grade.get("date", ""))
+        if d is None:
+            continue
+        if latest_date is None or d > latest_date:
+            latest_date = d
+            latest = grade
+    return latest
+
+
+def _val_latest_grade(data: dict[str, Any]) -> StateType:
+    grade = _latest_grade_entry(data)
+    return grade["grade"] if grade else None
+
+
+def _val_latest_message(data: dict[str, Any]) -> StateType:
+    msgs = data.get("messages") or []
+    if not msgs:
+        return None
+    return msgs[0].get("author") or None
+
+
+def _attrs_latest_message(data: dict[str, Any]) -> dict[str, Any]:
+    msgs = data.get("messages") or []
+    if not msgs:
+        return {}
+    msg = msgs[0]
+    return {
+        "sender": msg.get("author", ""),
+        "title": msg.get("title", ""),
+        "date": msg.get("date", ""),
+        "unread": bool(msg.get("unread", False)),
+        "has_attachment": bool(msg.get("has_attachment", False)),
+        "is_recent": bool(msg.get("is_recent", False)),
+    }
+
+
+def _val_next_exam(data: dict[str, Any]) -> StateType:
+    exams = data.get("upcoming_exams") or []
+    if not exams:
+        return None
+    return exams[0].get("days_until")
+
+
+def _attrs_next_exam(data: dict[str, Any]) -> dict[str, Any]:
+    exams = data.get("upcoming_exams") or []
+    if not exams:
+        return {}
+    e = exams[0]
+    return {
+        "subject": e.get("subject", ""),
+        "title": e.get("title", ""),
+        "category": e.get("category", ""),
+        "date": e.get("date", ""),
+        "hour": e.get("hour", ""),
+    }
+
+
+def _val_frequency(data: dict[str, Any]) -> StateType:
+    freq = data.get("attendance_frequency") or {}
+    if not freq:
+        return 0.0
+    return freq.get("current", 0.0)
+
+
+def _attrs_frequency(data: dict[str, Any]) -> dict[str, Any]:
+    freq = data.get("attendance_frequency") or {}
+    if not freq:
+        return {}
+    return {
+        "semester_1": freq.get("semester_1", 0.0),
+        "semester_2": freq.get("semester_2", 0.0),
+        "total": freq.get("total", 0.0),
+        "by_subject": data.get("attendance_by_subject", {}),
+    }
+
+
+def _absence_view(entry: dict[str, Any]) -> dict[str, Any]:
+    """Public-facing view of an attendance entry (subset of fields)."""
+    return {
+        "date": entry.get("date", ""),
+        "subject": entry.get("subject", ""),
+        "period": entry.get("period"),
+        "teacher": entry.get("teacher", ""),
+        "topic": entry.get("topic", ""),
+        "type": entry.get("type", ""),
+        "symbol": entry.get("symbol", ""),
+        "is_unjustified": bool(entry.get("is_unjustified", False)),
+        "is_excused": bool(entry.get("is_excused", False)),
+        "is_late": bool(entry.get("is_late", False)),
+    }
+
+
+def _val_absences_count(data: dict[str, Any]) -> StateType:
+    """Total entries that are absences (any kind) or lates."""
+    return sum(
+        1
+        for e in (data.get("attendance") or [])
+        if e.get("is_absence") or e.get("is_late")
+    )
+
+
+def _attrs_absences(data: dict[str, Any]) -> dict[str, Any]:
+    entries = data.get("attendance") or []
+    absences = [e for e in entries if e.get("is_absence")]
+    lates = [e for e in entries if e.get("is_late")]
+    excused = [e for e in entries if e.get("is_excused")]
+    unjustified = [e for e in entries if e.get("is_unjustified")]
+    return {
+        "total_absences": len(absences),
+        "unjustified_count": len(unjustified),
+        "excused_count": len(excused),
+        "lates_count": len(lates),
+        "absences": [_absence_view(e) for e in absences],
+        "lates": [_absence_view(e) for e in lates],
+        "excused": [_absence_view(e) for e in excused],
+        "absence_dates": [e.get("date", "") for e in absences],
+        "late_dates": [e.get("date", "") for e in lates],
+    }
+
+
+def _latest_absence_entry(data: dict[str, Any]) -> dict[str, Any] | None:
+    entries = [
+        e
+        for e in (data.get("attendance") or [])
+        if e.get("is_absence") or e.get("is_late")
+    ]
+    if not entries:
+        return None
+    # Coordinator already sorts ascending by date; take the last one.
+    latest: dict[str, Any] | None = None
+    latest_date: date | None = None
+    for e in entries:
+        d = _parse_grade_date(e.get("date", ""))
+        if d is None:
+            continue
+        if latest_date is None or d > latest_date:
+            latest_date = d
+            latest = e
+    return latest
+
+
+def _val_latest_absence(data: dict[str, Any]) -> StateType:
+    e = _latest_absence_entry(data)
+    return e.get("date") if e else None
+
+
+def _attrs_latest_absence(data: dict[str, Any]) -> dict[str, Any]:
+    e = _latest_absence_entry(data)
+    return _absence_view(e) if e else {}
+
+
+def _val_announcements_count(data: dict[str, Any]) -> StateType:
+    return len(data.get("announcements") or [])
+
+
+def _attrs_announcements(data: dict[str, Any]) -> dict[str, Any]:
+    items = data.get("announcements") or []
+    # Top 5 — full lista mogłaby przekroczyć limit atrybutów HA przy bardzo
+    # długich opisach.
+    return {
+        "announcements": [
+            {
+                "title": a.get("title", ""),
+                "author": a.get("author", ""),
+                "date": a.get("date", ""),
+                "description": a.get("description", ""),
+            }
+            for a in items[:5]
+        ],
+        "total_count": len(items),
+    }
+
+
+def _val_latest_announcement(data: dict[str, Any]) -> StateType:
+    items = data.get("announcements") or []
+    if not items:
+        return None
+    return items[0].get("title") or None
+
+
+def _attrs_latest_announcement(data: dict[str, Any]) -> dict[str, Any]:
+    items = data.get("announcements") or []
+    if not items:
+        return {}
+    a = items[0]
+    return {
+        "author": a.get("author", ""),
+        "date": a.get("date", ""),
+        "description": a.get("description", ""),
+    }
+
+
+def _attrs_latest_grade(data: dict[str, Any]) -> dict[str, Any]:
+    grade = _latest_grade_entry(data)
+    if not grade:
+        return {}
+    return {
+        "subject": grade.get("subject", ""),
+        "grade": grade.get("grade", ""),
+        "value": grade.get("value"),
+        "counts": grade.get("counts"),
+        "weight": grade.get("weight"),
+        "date": grade.get("date", ""),
+        "category": grade.get("category", ""),
+        "description": grade.get("description", ""),
+        "title": grade.get("title", ""),
+        "teacher": grade.get("teacher", ""),
+        "semester": grade.get("semester"),
     }
 
 
@@ -236,6 +459,69 @@ SENSORS: tuple[LibrusSensorEntityDescription, ...] = (
         state_class=SensorStateClass.MEASUREMENT,
         value_fn=_val_upcoming_exams_count,
         attrs_fn=_attrs_upcoming_exams,
+    ),
+    # ---- v3.0 NEW: latest_/next_ sensors ----
+    LibrusSensorEntityDescription(
+        key="latest_grade",
+        translation_key="latest_grade",
+        icon="mdi:school-outline",
+        value_fn=_val_latest_grade,
+        attrs_fn=_attrs_latest_grade,
+    ),
+    LibrusSensorEntityDescription(
+        key="latest_message",
+        translation_key="latest_message",
+        icon="mdi:email-outline",
+        value_fn=_val_latest_message,
+        attrs_fn=_attrs_latest_message,
+    ),
+    LibrusSensorEntityDescription(
+        key="next_exam",
+        translation_key="next_exam",
+        icon="mdi:calendar-clock",
+        state_class=SensorStateClass.MEASUREMENT,
+        native_unit_of_measurement="d",
+        value_fn=_val_next_exam,
+        attrs_fn=_attrs_next_exam,
+    ),
+    # ---- v3.0 NEW: attendance domain ----
+    LibrusSensorEntityDescription(
+        key="frekwencja",
+        translation_key="attendance_frequency",
+        icon="mdi:account-check",
+        state_class=SensorStateClass.MEASUREMENT,
+        native_unit_of_measurement="%",
+        value_fn=_val_frequency,
+        attrs_fn=_attrs_frequency,
+    ),
+    LibrusSensorEntityDescription(
+        key="nieobecnosci",
+        translation_key="absences",
+        icon="mdi:account-minus",
+        value_fn=_val_absences_count,
+        attrs_fn=_attrs_absences,
+    ),
+    LibrusSensorEntityDescription(
+        key="latest_absence",
+        translation_key="latest_absence",
+        icon="mdi:calendar-remove",
+        value_fn=_val_latest_absence,
+        attrs_fn=_attrs_latest_absence,
+    ),
+    # ---- v3.0 NEW: announcements domain ----
+    LibrusSensorEntityDescription(
+        key="ogloszenia",
+        translation_key="announcements",
+        icon="mdi:bullhorn",
+        value_fn=_val_announcements_count,
+        attrs_fn=_attrs_announcements,
+    ),
+    LibrusSensorEntityDescription(
+        key="latest_announcement",
+        translation_key="latest_announcement",
+        icon="mdi:bullhorn-outline",
+        value_fn=_val_latest_announcement,
+        attrs_fn=_attrs_latest_announcement,
     ),
 )
 
