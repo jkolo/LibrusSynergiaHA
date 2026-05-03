@@ -8,6 +8,21 @@
           "username": "Username/Login",
           "password": "Password"
         }
+      },
+      "reauth_confirm": {
+        "title": "Re-authenticate Librus APIX",
+        "description": "Your Librus password no longer works for {username}. Enter the new password to restore the integration.",
+        "data": {
+          "password": "Password"
+        }
+      },
+      "reconfigure": {
+        "title": "Reconfigure Librus APIX",
+        "description": "Change your Librus Synergia credentials.",
+        "data": {
+          "username": "Username/Login",
+          "password": "Password"
+        }
       }
     },
     "error": {
@@ -15,7 +30,10 @@
       "unknown": "Unexpected error occurred"
     },
     "abort": {
-      "already_configured": "Device is already configured"
+      "already_configured": "Account is already configured",
+      "reauth_successful": "Re-authentication successful — integration reloaded.",
+      "reconfigure_successful": "Reconfiguration successful — integration reloaded.",
+      "account_mismatch": "The new username does not match this config entry. To use a different account, add it as a new integration."
     }
   }
 }

@@ -112,3 +112,92 @@ async def test_user_step_unique_id_lowercase(
     # Unique id stored on the entry should be lowercased.
     entries = hass.config_entries.async_entries(DOMAIN)
     assert entries[0].unique_id == "test_user"
+
+
+async def test_reauth_flow_happy_path(hass: HomeAssistant, mock_validate_input):
+    """Reauth: user provides new password → entry updated, abort reauth_successful."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={CONF_USERNAME: "test_user", CONF_PASSWORD: "old_password"},
+        unique_id="test_user",
+    )
+    entry.add_to_hass(hass)
+
+    result = await entry.start_reauth_flow(hass)
+    assert result["type"] == FlowResultType.FORM
+    assert result["step_id"] == "reauth_confirm"
+
+    result2 = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {CONF_PASSWORD: "new_password"}
+    )
+    assert result2["type"] == FlowResultType.ABORT
+    assert result2["reason"] == "reauth_successful"
+    assert entry.data[CONF_PASSWORD] == "new_password"
+
+
+async def test_reauth_flow_invalid_credentials(hass: HomeAssistant):
+    """Reauth: validate_input raises → form re-shown with cannot_connect."""
+    from unittest.mock import AsyncMock, patch
+
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={CONF_USERNAME: "test_user", CONF_PASSWORD: "old"},
+        unique_id="test_user",
+    )
+    entry.add_to_hass(hass)
+
+    with patch(
+        "custom_components.librus_apix.config_flow.validate_input",
+        new=AsyncMock(side_effect=ValueError("nope")),
+    ):
+        result = await entry.start_reauth_flow(hass)
+        result2 = await hass.config_entries.flow.async_configure(
+            result["flow_id"], {CONF_PASSWORD: "still_wrong"}
+        )
+
+    assert result2["type"] == FlowResultType.FORM
+    assert result2["errors"] == {"base": "cannot_connect"}
+
+
+async def test_reconfigure_flow_changes_password(
+    hass: HomeAssistant, mock_validate_input
+):
+    """Reconfigure: user updates password for same login → success."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={CONF_USERNAME: "test_user", CONF_PASSWORD: "old"},
+        unique_id="test_user",
+    )
+    entry.add_to_hass(hass)
+
+    result = await entry.start_reconfigure_flow(hass)
+    assert result["type"] == FlowResultType.FORM
+    assert result["step_id"] == "reconfigure"
+
+    result2 = await hass.config_entries.flow.async_configure(
+        result["flow_id"],
+        {CONF_USERNAME: "test_user", CONF_PASSWORD: "new"},
+    )
+    assert result2["type"] == FlowResultType.ABORT
+    assert result2["reason"] == "reconfigure_successful"
+    assert entry.data[CONF_PASSWORD] == "new"
+
+
+async def test_reconfigure_flow_blocks_username_change(
+    hass: HomeAssistant, mock_validate_input
+):
+    """Reconfigure: changing username to a different one is blocked."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={CONF_USERNAME: "test_user", CONF_PASSWORD: "old"},
+        unique_id="test_user",
+    )
+    entry.add_to_hass(hass)
+
+    result = await entry.start_reconfigure_flow(hass)
+    result2 = await hass.config_entries.flow.async_configure(
+        result["flow_id"],
+        {CONF_USERNAME: "different_user", CONF_PASSWORD: "x"},
+    )
+    assert result2["type"] == FlowResultType.ABORT
+    assert result2["reason"] == "account_mismatch"
