@@ -72,6 +72,30 @@
       },
       "upcoming_exams": {
         "name": "Upcoming exams"
+      },
+      "latest_grade": {
+        "name": "Latest grade"
+      },
+      "latest_message": {
+        "name": "Latest message"
+      },
+      "next_exam": {
+        "name": "Next exam"
+      },
+      "attendance_frequency": {
+        "name": "Attendance"
+      },
+      "absences": {
+        "name": "Absences"
+      },
+      "latest_absence": {
+        "name": "Latest absence"
+      },
+      "announcements": {
+        "name": "Announcements"
+      },
+      "latest_announcement": {
+        "name": "Latest announcement"
       }
     },
     "calendar": {
