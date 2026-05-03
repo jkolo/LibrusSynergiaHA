@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import random
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date as _date, datetime as _dt, timedelta
@@ -12,6 +13,7 @@ from typing import Any, TypeVar
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_PASSWORD, CONF_USERNAME
 from homeassistant.core import HomeAssistant
+from librus_apix import urls as librus_urls
 from librus_apix.client import Client, new_client
 from librus_apix.exceptions import TokenError
 from librus_apix.grades import get_grades
@@ -22,6 +24,7 @@ from librus_apix.timetable import get_timetable
 
 from .const import DOMAIN
 from .coordinator import LibrusDataUpdateCoordinator
+from .humanize import build_headers, pick_user_agent
 
 T = TypeVar("T")
 
@@ -70,13 +73,51 @@ def _current_semester() -> int:
 class LibrusApiClient:
     """Class to interface with the Librus API."""
 
-    def __init__(self, username: str, password: str) -> None:
-        """Initialize the client."""
+    def __init__(
+        self,
+        username: str,
+        password: str,
+        *,
+        rng: random.Random | None = None,
+    ) -> None:
+        """Initialize the client.
+
+        Args:
+            username: Librus login.
+            password: Librus password.
+            rng: Optional `random.Random` for deterministic User-Agent
+                selection (testing) or per-entry stable choice (seed by
+                entry_id at the call site).
+        """
         self.username = username
         self.password = password
         self._client: Client | None = None
         self._token: Any | None = None
         self._auth_lock = asyncio.Lock()
+        self._rng = rng or random.Random()
+        # UA wybrany raz przy starcie integracji — przeglądarka też nie
+        # zmienia UA mid-session. Stabilny do reloadu.
+        self._user_agent = pick_user_agent(self._rng)
+        self._headers = build_headers(self._user_agent)
+        _LOGGER.debug(
+            "Librus client created for %s with User-Agent=%s",
+            username, self._user_agent,
+        )
+
+    def _apply_headers(self) -> None:
+        """Patch the global librus_apix.urls.HEADERS dict with our headers.
+
+        The library reads headers via `s.headers = urls.HEADERS` (reference
+        to a module-level dict) in every HTTP method. By replacing the
+        dict's contents (not rebinding the name) we propagate our browser-
+        like headers through all library calls without modifying the lib.
+
+        Idempotent — safe to call before every fetch. With multiple config
+        entries the global dict can race; we accept this since both
+        entries' headers are realistic (anti-bot won't notice the swap).
+        """
+        librus_urls.HEADERS.clear()
+        librus_urls.HEADERS.update(self._headers)
 
     def _reset_auth(self) -> None:
         """Reset authentication state to force re-authentication on next call."""
@@ -87,6 +128,9 @@ class LibrusApiClient:
         """Authenticate with Librus API."""
         async with self._auth_lock:
             try:
+                # Patch headers before initial token fetch too — the very
+                # first request to /OAuth/Authorization uses urls.HEADERS.
+                self._apply_headers()
                 loop = asyncio.get_running_loop()
                 self._client = await loop.run_in_executor(None, new_client)
                 self._token = await loop.run_in_executor(
@@ -126,6 +170,10 @@ class LibrusApiClient:
                                 f"Authentication failed twice fetching {label}"
                             )
                         continue
+                # Apply browser-like headers before every request — the
+                # library uses a global `urls.HEADERS` dict, so we patch
+                # it idempotently per call.
+                self._apply_headers()
                 loop = asyncio.get_running_loop()
                 return await loop.run_in_executor(None, work, self._client)
             except TokenError:
@@ -409,7 +457,12 @@ class LibrusApiClient:
 
 async def async_setup_entry(hass: HomeAssistant, entry: LibrusConfigEntry) -> bool:
     """Set up Librus APIX from a config entry."""
-    client = LibrusApiClient(entry.data[CONF_USERNAME], entry.data[CONF_PASSWORD])
+    # Seed RNG by entry_id so each child gets a stable but distinct UA
+    # across HA restarts (deterministic per entry, different per entry).
+    rng = random.Random(entry.entry_id)
+    client = LibrusApiClient(
+        entry.data[CONF_USERNAME], entry.data[CONF_PASSWORD], rng=rng
+    )
 
     # Coordinator wykonuje pierwszy login w _async_setup() podczas
     # async_config_entry_first_refresh(). On failure rzuca ConfigEntryNotReady
