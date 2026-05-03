@@ -584,9 +584,10 @@ class LibrusSubjectGradesSensor(LibrusBaseEntity, SensorEntity):
     """Sensor exposing grades for a single subject."""
 
     _attr_icon = "mdi:book-open-variant"
-    # Per-subject sensors quickly become noise (often 15+ subjects per child).
-    # Disabled by default — users opt-in to subjects they care about.
-    _attr_entity_registry_enabled_default = False
+    # v3.0: enabled by default. Users opt-out via OptionsFlow `enabled_subjects`
+    # multi-select — sensor.py refuses to instantiate excluded subjects, the
+    # entity registry handles cleanup on reload.
+    _attr_entity_registry_enabled_default = True
 
     def __init__(
         self,
@@ -646,7 +647,7 @@ class LibrusSubjectAverageSensor(LibrusBaseEntity, SensorEntity):
 
     _attr_icon = "mdi:chart-bar"
     _attr_state_class = SensorStateClass.MEASUREMENT
-    _attr_entity_registry_enabled_default = False
+    _attr_entity_registry_enabled_default = True
 
     def __init__(
         self,
@@ -710,9 +711,15 @@ async def async_setup_entry(
         new_subjects = current_subjects - known_subjects
         if not new_subjects:
             return
+        # User-side filter: gdy w options ustawiona jest lista wybranych
+        # przedmiotow, omijamy te poza listy. None / brak klucza = wszystko
+        # wlaczone (zachowanie default w v3).
+        enabled = config_entry.options.get("enabled_subjects")
         known_subjects.update(new_subjects)
         new_entities: list[SensorEntity] = []
         for subject in new_subjects:
+            if enabled is not None and subject not in enabled:
+                continue
             new_entities.append(
                 LibrusSubjectGradesSensor(coordinator, subject, config_entry)
             )

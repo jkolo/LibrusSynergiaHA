@@ -21,6 +21,7 @@ OPT_QUIET_START = "quiet_start"
 OPT_QUIET_END = "quiet_end"
 OPT_OFF_SCHOOL_MULTIPLIER = "off_school_multiplier"
 OPT_HUMANIZE = "humanize"
+OPT_ENABLED_SUBJECTS = "enabled_subjects"
 
 # Defaults — also used by the coordinator when entry.options is empty.
 DEFAULT_BASE_MINUTES = 120

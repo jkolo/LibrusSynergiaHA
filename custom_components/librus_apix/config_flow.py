@@ -13,6 +13,7 @@ from homeassistant.config_entries import ConfigEntry, OptionsFlow
 from homeassistant.const import CONF_PASSWORD, CONF_USERNAME
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.data_entry_flow import FlowResult
+from homeassistant.helpers import config_validation as cv
 
 from librus_apix.client import new_client
 
@@ -26,6 +27,7 @@ from .const import (
     DEFAULT_QUIET_START,
     DOMAIN,
     OPT_BASE_MINUTES,
+    OPT_ENABLED_SUBJECTS,
     OPT_HUMANIZE,
     OPT_JITTER,
     OPT_OFF_SCHOOL_MULTIPLIER,
@@ -218,40 +220,56 @@ class LibrusOptionsFlow(OptionsFlow):
             return self.async_create_entry(title="", data=user_input)
 
         opts = self.config_entry.options
-        schema = vol.Schema(
-            {
-                vol.Optional(
-                    OPT_BASE_MINUTES,
-                    default=opts.get(OPT_BASE_MINUTES, DEFAULT_BASE_MINUTES),
-                ): vol.All(int, vol.Range(min=15, max=720)),
-                vol.Optional(
-                    OPT_JITTER,
-                    default=opts.get(OPT_JITTER, DEFAULT_JITTER),
-                ): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=0.5)),
-                vol.Optional(
-                    OPT_QUIET_HOURS_ENABLED,
-                    default=opts.get(
-                        OPT_QUIET_HOURS_ENABLED, DEFAULT_QUIET_HOURS_ENABLED
-                    ),
-                ): bool,
-                vol.Optional(
-                    OPT_QUIET_START,
-                    default=opts.get(OPT_QUIET_START, DEFAULT_QUIET_START),
-                ): str,
-                vol.Optional(
-                    OPT_QUIET_END,
-                    default=opts.get(OPT_QUIET_END, DEFAULT_QUIET_END),
-                ): str,
-                vol.Optional(
-                    OPT_OFF_SCHOOL_MULTIPLIER,
-                    default=opts.get(
-                        OPT_OFF_SCHOOL_MULTIPLIER, DEFAULT_OFF_SCHOOL_MULTIPLIER
-                    ),
-                ): vol.All(vol.Coerce(float), vol.Range(min=1.0, max=10.0)),
-                vol.Optional(
-                    OPT_HUMANIZE,
-                    default=opts.get(OPT_HUMANIZE, DEFAULT_HUMANIZE),
-                ): bool,
-            }
-        )
-        return self.async_show_form(step_id="init", data_schema=schema)
+
+        # Per-subject multi-select — z runtime_data wyciagamy aktualnie
+        # znane przedmioty; default = wszystko zaznaczone (PR 6).
+        known_subjects: list[str] = []
+        runtime = getattr(self.config_entry, "runtime_data", None)
+        if runtime is not None:
+            coordinator = getattr(runtime, "coordinator", None)
+            if coordinator is not None and coordinator.data:
+                known_subjects = sorted(
+                    (coordinator.data.get("grades_by_subject") or {}).keys()
+                )
+        default_subjects = opts.get(OPT_ENABLED_SUBJECTS) or known_subjects
+
+        schema_dict = {
+            vol.Optional(
+                OPT_BASE_MINUTES,
+                default=opts.get(OPT_BASE_MINUTES, DEFAULT_BASE_MINUTES),
+            ): vol.All(int, vol.Range(min=15, max=720)),
+            vol.Optional(
+                OPT_JITTER,
+                default=opts.get(OPT_JITTER, DEFAULT_JITTER),
+            ): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=0.5)),
+            vol.Optional(
+                OPT_QUIET_HOURS_ENABLED,
+                default=opts.get(
+                    OPT_QUIET_HOURS_ENABLED, DEFAULT_QUIET_HOURS_ENABLED
+                ),
+            ): bool,
+            vol.Optional(
+                OPT_QUIET_START,
+                default=opts.get(OPT_QUIET_START, DEFAULT_QUIET_START),
+            ): str,
+            vol.Optional(
+                OPT_QUIET_END,
+                default=opts.get(OPT_QUIET_END, DEFAULT_QUIET_END),
+            ): str,
+            vol.Optional(
+                OPT_OFF_SCHOOL_MULTIPLIER,
+                default=opts.get(
+                    OPT_OFF_SCHOOL_MULTIPLIER, DEFAULT_OFF_SCHOOL_MULTIPLIER
+                ),
+            ): vol.All(vol.Coerce(float), vol.Range(min=1.0, max=10.0)),
+            vol.Optional(
+                OPT_HUMANIZE,
+                default=opts.get(OPT_HUMANIZE, DEFAULT_HUMANIZE),
+            ): bool,
+        }
+        if known_subjects:
+            schema_dict[
+                vol.Optional(OPT_ENABLED_SUBJECTS, default=default_subjects)
+            ] = cv.multi_select({s: s for s in known_subjects})
+
+        return self.async_show_form(step_id="init", data_schema=vol.Schema(schema_dict))
