@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import date as _date, timedelta
-from typing import Any
+from datetime import date as _date, datetime as _dt, timedelta
+from typing import Any, TypeVar
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_PASSWORD, CONF_USERNAME
@@ -21,6 +22,8 @@ from librus_apix.timetable import get_timetable
 
 from .const import DOMAIN
 from .coordinator import LibrusDataUpdateCoordinator
+
+T = TypeVar("T")
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -86,81 +89,89 @@ class LibrusApiClient:
                 self._reset_auth()
                 return False
 
-    async def async_get_grades(self) -> list[dict[str, Any]] | None:
-        """Get grades from Librus."""
+    async def _with_retry(
+        self,
+        label: str,
+        work: Callable[[Client], T],
+    ) -> T | None:
+        """Run a sync librus-apix call with auth retry.
+
+        `work` runs in the default executor. If it raises TokenError we
+        re-authenticate and try once more; any other exception is logged
+        and the second attempt also returns None.
+        """
         for attempt in range(2):
             try:
                 if not self._client or not self._token:
                     if not await self.async_authenticate():
                         return None
-                client = self._client
-
                 loop = asyncio.get_running_loop()
-                numeric_grades, average_grades, descriptive_grades = await loop.run_in_executor(
-                    None, get_grades, client, "all"
-                )
-
-                current_sem = _current_semester()
-                _LOGGER.debug("Filtrowanie ocen dla semestru %d", current_sem)
-
-                # Process all grades
-                all_grades = []
-
-                # Process numeric grades (only current semester)
-                for subject_grades in numeric_grades:
-                    for subject, grades_list in subject_grades.items():
-                        for grade in grades_list:
-                            if grade.semester != current_sem:
-                                continue
-                            all_grades.append({
-                                'subject': subject,
-                                'grade': grade.grade,
-                                'date': grade.date,
-                                'category': grade.category,
-                                'teacher': getattr(grade, 'teacher', ''),
-                                'semester': grade.semester,
-                                'type': 'numeric'
-                            })
-
-                # Process descriptive grades (only current semester, many are actually numeric)
-                for subject_grades in descriptive_grades:
-                    for subject, grades_list in subject_grades.items():
-                        for desc_grade in grades_list:
-                            if desc_grade.semester != current_sem:
-                                continue
-                            grade_val = desc_grade.grade.strip()
-                            if grade_val and (grade_val.replace('+', '').replace('-', '').isdigit() or
-                                            grade_val in ['1', '2', '3', '4', '5', '6', '1+', '1-', '2+', '2-',
-                                                         '3+', '3-', '4+', '4-', '5+', '5-', '6+', '6-']):
-                                all_grades.append({
-                                    'subject': subject,
-                                    'grade': desc_grade.grade,
-                                    'date': desc_grade.date,
-                                    'category': getattr(desc_grade, 'desc', '').split('\n')[0] if hasattr(desc_grade, 'desc') else '',
-                                    'teacher': getattr(desc_grade, 'teacher', ''),
-                                    'semester': desc_grade.semester,
-                                    'type': 'descriptive'
-                                })
-
-                return all_grades
-
+                return await loop.run_in_executor(None, work, self._client)
             except TokenError:
                 _LOGGER.warning(
-                    "Token expired fetching grades (attempt %d/2), re-authenticating...",
-                    attempt + 1,
+                    "Token expired fetching %s (attempt %d/2), re-authenticating...",
+                    label, attempt + 1,
                 )
                 self._reset_auth()
                 if attempt == 1:
-                    _LOGGER.error("Failed to get grades after re-authentication.")
+                    _LOGGER.error("Failed to get %s after re-authentication.", label)
                     return None
             except Exception:
                 _LOGGER.exception(
-                    "Failed to get grades (attempt %d/2)", attempt + 1
+                    "Failed to get %s (attempt %d/2)", label, attempt + 1
                 )
                 self._reset_auth()
                 if attempt == 1:
                     return None
         return None
+
+    async def async_get_grades(self) -> list[dict[str, Any]] | None:
+        """Get grades from Librus."""
+        current_sem = _current_semester()
+        _LOGGER.debug("Filtrowanie ocen dla semestru %d", current_sem)
+
+        def _work(client: Client) -> list[dict[str, Any]]:
+            numeric_grades, _avg, descriptive_grades = get_grades(client, "all")
+
+            all_grades: list[dict[str, Any]] = []
+
+            for subject_grades in numeric_grades:
+                for subject, grades_list in subject_grades.items():
+                    for grade in grades_list:
+                        if grade.semester != current_sem:
+                            continue
+                        all_grades.append({
+                            "subject": subject,
+                            "grade": grade.grade,
+                            "date": grade.date,
+                            "category": grade.category,
+                            "teacher": getattr(grade, "teacher", ""),
+                            "semester": grade.semester,
+                            "type": "numeric",
+                        })
+
+            for subject_grades in descriptive_grades:
+                for subject, grades_list in subject_grades.items():
+                    for desc_grade in grades_list:
+                        if desc_grade.semester != current_sem:
+                            continue
+                        grade_val = desc_grade.grade.strip()
+                        # Akceptuj wartosc jesli po usunieciu +/- jest cyfra (1-6).
+                        if grade_val and grade_val.replace("+", "").replace("-", "").isdigit():
+                            desc = getattr(desc_grade, "desc", "")
+                            all_grades.append({
+                                "subject": subject,
+                                "grade": desc_grade.grade,
+                                "date": desc_grade.date,
+                                "category": desc.split("\n")[0] if desc else "",
+                                "teacher": getattr(desc_grade, "teacher", ""),
+                                "semester": desc_grade.semester,
+                                "type": "descriptive",
+                            })
+
+            return all_grades
+
+        return await self._with_retry("grades", _work)
 
     async def async_get_messages(self, count: int = 10) -> list[dict[str, Any]] | None:
         """Get latest messages from Librus.
@@ -168,77 +179,26 @@ class LibrusApiClient:
         Only subject and sender are returned — message body is NOT fetched
         to avoid marking messages as read in Librus.
         """
-        for attempt in range(2):
-            try:
-                if not self._client or not self._token:
-                    if not await self.async_authenticate():
-                        return None
-                client = self._client
+        def _work(client: Client) -> list[dict[str, Any]]:
+            messages = get_received(client, 0)
+            messages = messages[:count] if messages else []
+            return [
+                {
+                    "author": msg.author,
+                    "title": msg.title,
+                    "date": msg.date,
+                    "href": msg.href,
+                    "unread": msg.unread,
+                    "has_attachment": msg.has_attachment,
+                }
+                for msg in messages
+            ]
 
-                loop = asyncio.get_running_loop()
-                messages = await loop.run_in_executor(None, get_received, client, 0)
-                messages = messages[:count] if messages else []
-
-                return [
-                    {
-                        "author": msg.author,
-                        "title": msg.title,
-                        "date": msg.date,
-                        "href": msg.href,
-                        "unread": msg.unread,
-                        "has_attachment": msg.has_attachment,
-                    }
-                    for msg in messages
-                ]
-
-            except TokenError:
-                _LOGGER.warning(
-                    "Token expired fetching messages (attempt %d/2), re-authenticating...",
-                    attempt + 1,
-                )
-                self._reset_auth()
-                if attempt == 1:
-                    _LOGGER.error("Failed to get messages after re-authentication.")
-                    return None
-            except Exception:
-                _LOGGER.exception(
-                    "Failed to get messages (attempt %d/2)", attempt + 1
-                )
-                self._reset_auth()
-                if attempt == 1:
-                    return None
-        return None
+        return await self._with_retry("messages", _work)
 
     async def async_get_student_information(self) -> Any | None:
         """Get student information from Librus."""
-        for attempt in range(2):
-            try:
-                if not self._client or not self._token:
-                    if not await self.async_authenticate():
-                        return None
-
-                loop = asyncio.get_running_loop()
-                return await loop.run_in_executor(
-                    None, get_student_information, self._client
-                )
-
-            except TokenError:
-                _LOGGER.warning(
-                    "Token expired fetching student info (attempt %d/2), re-authenticating...",
-                    attempt + 1,
-                )
-                self._reset_auth()
-                if attempt == 1:
-                    _LOGGER.error("Failed to get student info after re-authentication.")
-                    return None
-            except Exception:
-                _LOGGER.exception(
-                    "Failed to get student information (attempt %d/2)", attempt + 1
-                )
-                self._reset_auth()
-                if attempt == 1:
-                    return None
-        return None
+        return await self._with_retry("student information", get_student_information)
 
     async def async_get_schedule_events(
         self, months_ahead: int = 2, only_exams: bool = True
@@ -255,148 +215,114 @@ class LibrusApiClient:
             Lista dictow z polami: title, subject, category, date (YYYY-MM-DD),
             hour, day, href, days_until, is_exam, is_day_off.
         """
-        for attempt in range(2):
-            try:
-                if not self._client or not self._token:
-                    if not await self.async_authenticate():
-                        return None
-                client = self._client
+        today = _date.today()
 
-                loop = asyncio.get_running_loop()
-                today = _date.today()
+        # Slowa kluczowe wykluczajace - jesli wystapia, event jest klasyfikowany
+        # jako dzien_wolny (Librus pokazuje "Egzamin osmoklasisty - dzien wolny"
+        # jako event, ale to dzien wolny od zajec, nie sprawdzian).
+        exclude_keywords = (
+            "dzien wolny",
+            "dzień wolny",
+            "wolne od zaj",
+            "wolny od zaj",
+        )
+        # href zawierajacy "wolne" wskazuje na dzien wolny w terminarzu Librusa
+        exclude_href_fragments = ("szczegoly_wolne", "wolne")
 
-                # Pobierz schedule dla biezacego + nastepnych miesiecy
-                month_year_pairs = []
-                for offset in range(months_ahead):
-                    target = today.replace(day=1) + timedelta(days=32 * offset)
-                    target = target.replace(day=1)
-                    month_year_pairs.append((target.month, target.year))
+        # Pobierz schedule dla biezacego + nastepnych miesiecy
+        month_year_pairs: list[tuple[int, int]] = []
+        for offset in range(months_ahead):
+            target = today.replace(day=1) + timedelta(days=32 * offset)
+            target = target.replace(day=1)
+            month_year_pairs.append((target.month, target.year))
 
-                events_raw = []
-                for month, year in month_year_pairs:
-                    try:
-                        result = await loop.run_in_executor(
-                            None, get_schedule, client, str(month), str(year), False
-                        )
-                        # result: DefaultDict[int, List[Event]] — klucz = dzien miesiaca
-                        for day_num, day_events in result.items():
-                            for event in day_events:
-                                events_raw.append((month, year, day_num, event))
-                    except Exception as ex:
-                        _LOGGER.debug(
-                            "Schedule fetch failed for %d/%d: %s", month, year, ex
-                        )
-                        continue
-
-                # Filtruj eventy ktore sa sprawdzianami/kartkowkami
-                # Slowa kluczowe (positive) - musi byc co najmniej jedno
-                exam_keywords = (
-                    "sprawdzian",
-                    "kartkow",  # kartkowka/kartkowki
-                    "praca klasowa",
-                    "praca kontrolna",
-                    "test ",
-                    "wypracowanie klasowe",
-                )
-                # Negatywne slowa - jesli wystapia, event jest wykluczony
-                # (Librus pokazuje "Egzamin osmoklasisty - dzien wolny" jako event,
-                #  ale to dzien wolny od zajec, nie sprawdzian dla naszych dzieci)
-                exclude_keywords = (
-                    "dzien wolny",
-                    "dzień wolny",
-                    "wolne od zaj",
-                    "wolny od zaj",
-                )
-                # href zawierajacy "wolne" wskazuje na dzien wolny w terminarzu Librusa
-                exclude_href_fragments = ("szczegoly_wolne", "wolne",)
-
-                upcoming = []
-                for month, year, day_num, event in events_raw:
-                    try:
-                        event_date = _date(year, month, day_num)
-                    except ValueError:
-                        continue
-
-                    if event_date < today:
-                        continue  # przeszle pomijamy
-
-                    title = (event.title or "").lower()
-                    subject = event.subject or ""
-                    # event.data to dict - moze zawierac szczegoly (Kategoria, Typ)
-                    data_dict = event.data if isinstance(event.data, dict) else {}
-                    category_str = str(data_dict.get("Kategoria", "")).lower()
-                    type_str = str(data_dict.get("Typ", "")).lower()
-                    haystack = f"{title} {category_str} {type_str}"
-                    href_lower = (event.href or "").lower()
-
-                    is_day_off = (
-                        any(ex in haystack for ex in exclude_keywords)
-                        or any(frag in href_lower for frag in exclude_href_fragments)
+        def _work(client: Client) -> list[dict[str, Any]]:
+            events_raw: list[tuple[int, int, int, Any]] = []
+            for month, year in month_year_pairs:
+                try:
+                    result = get_schedule(client, str(month), str(year), False)
+                except TokenError:
+                    raise  # bubble up to _with_retry for re-auth
+                except Exception as ex:
+                    _LOGGER.debug(
+                        "Schedule fetch failed for %d/%d: %s", month, year, ex
                     )
-                    # Klasyfikacja machine-readable do tagowania w calendar:
-                    # sprawdzian / kartkowka / praca_klasowa / praca_kontrolna /
-                    # wypracowanie_klasowe / test / dzien_wolny / inne
-                    if is_day_off:
-                        event_type = "dzien_wolny"
-                    elif "sprawdzian" in haystack:
-                        event_type = "sprawdzian"
-                    elif "kartkow" in haystack:
-                        event_type = "kartkowka"
-                    elif "praca klasowa" in haystack:
-                        event_type = "praca_klasowa"
-                    elif "praca kontrolna" in haystack:
-                        event_type = "praca_kontrolna"
-                    elif "wypracowanie klasowe" in haystack:
-                        event_type = "wypracowanie_klasowe"
-                    elif "test " in haystack:
-                        event_type = "test"
-                    else:
-                        event_type = "inne"
-                    is_exam = event_type in (
-                        "sprawdzian", "kartkowka", "praca_klasowa",
-                        "praca_kontrolna", "wypracowanie_klasowe", "test",
-                    )
+                    continue
+                # result: DefaultDict[int, List[Event]] — klucz = dzien miesiaca
+                for day_num, day_events in result.items():
+                    for event in day_events:
+                        events_raw.append((month, year, day_num, event))
 
-                    if only_exams and not is_exam:
-                        continue
+            upcoming: list[dict[str, Any]] = []
+            for month, year, day_num, event in events_raw:
+                try:
+                    event_date = _date(year, month, day_num)
+                except ValueError:
+                    continue
 
-                    days_until = (event_date - today).days
-                    upcoming.append({
-                        "title": event.title,
-                        "subject": subject,
-                        "category": data_dict.get("Kategoria") or data_dict.get("Typ") or "",
-                        "date": event_date.isoformat(),
-                        "hour": event.hour or "",
-                        "day_label": event.day or "",
-                        "lesson_number": event.number,
-                        "href": event.href or "",
-                        "days_until": days_until,
-                        "is_exam": is_exam,
-                        "is_day_off": is_day_off,
-                        "event_type": event_type,
-                    })
+                if event_date < today:
+                    continue  # przeszle pomijamy
 
-                # Sortuj po dacie
-                upcoming.sort(key=lambda e: (e["date"], e.get("hour") or ""))
-                return upcoming
+                title = (event.title or "").lower()
+                subject = event.subject or ""
+                # event.data to dict - moze zawierac szczegoly (Kategoria, Typ)
+                data_dict = event.data if isinstance(event.data, dict) else {}
+                category_str = str(data_dict.get("Kategoria", "")).lower()
+                type_str = str(data_dict.get("Typ", "")).lower()
+                haystack = f"{title} {category_str} {type_str}"
+                href_lower = (event.href or "").lower()
 
-            except TokenError:
-                _LOGGER.warning(
-                    "Token expired fetching schedule (attempt %d/2), re-authenticating...",
-                    attempt + 1,
+                is_day_off = (
+                    any(ex in haystack for ex in exclude_keywords)
+                    or any(frag in href_lower for frag in exclude_href_fragments)
                 )
-                self._reset_auth()
-                if attempt == 1:
-                    _LOGGER.error("Failed to get schedule after re-authentication.")
-                    return None
-            except Exception:
-                _LOGGER.exception(
-                    "Failed to get schedule (attempt %d/2)", attempt + 1
+                # Klasyfikacja machine-readable do tagowania w calendar:
+                # sprawdzian / kartkowka / praca_klasowa / praca_kontrolna /
+                # wypracowanie_klasowe / test / dzien_wolny / inne
+                if is_day_off:
+                    event_type = "dzien_wolny"
+                elif "sprawdzian" in haystack:
+                    event_type = "sprawdzian"
+                elif "kartkow" in haystack:
+                    event_type = "kartkowka"
+                elif "praca klasowa" in haystack:
+                    event_type = "praca_klasowa"
+                elif "praca kontrolna" in haystack:
+                    event_type = "praca_kontrolna"
+                elif "wypracowanie klasowe" in haystack:
+                    event_type = "wypracowanie_klasowe"
+                elif "test " in haystack:
+                    event_type = "test"
+                else:
+                    event_type = "inne"
+                is_exam = event_type in (
+                    "sprawdzian", "kartkowka", "praca_klasowa",
+                    "praca_kontrolna", "wypracowanie_klasowe", "test",
                 )
-                self._reset_auth()
-                if attempt == 1:
-                    return None
-        return None
+
+                if only_exams and not is_exam:
+                    continue
+
+                days_until = (event_date - today).days
+                upcoming.append({
+                    "title": event.title,
+                    "subject": subject,
+                    "category": data_dict.get("Kategoria") or data_dict.get("Typ") or "",
+                    "date": event_date.isoformat(),
+                    "hour": event.hour or "",
+                    "day_label": event.day or "",
+                    "lesson_number": event.number,
+                    "href": event.href or "",
+                    "days_until": days_until,
+                    "is_exam": is_exam,
+                    "is_day_off": is_day_off,
+                    "event_type": event_type,
+                })
+
+            upcoming.sort(key=lambda e: (e["date"], e.get("hour") or ""))
+            return upcoming
+
+        return await self._with_retry("schedule", _work)
 
     async def async_get_timetable_events(
         self, weeks_ahead: int = 2
@@ -411,74 +337,47 @@ class LibrusApiClient:
             time_from (HH:MM), time_to (HH:MM), weekday, lesson_number, info.
             None jesli blad.
         """
-        from datetime import datetime as _dt
+        today = _date.today()
+        # Najblizszy poniedzialek (lub dzisiaj jesli to poniedzialek)
+        monday = today - timedelta(days=today.weekday())
 
-        for attempt in range(2):
-            try:
-                if not self._client or not self._token:
-                    if not await self.async_authenticate():
-                        return None
-                client = self._client
-
-                loop = asyncio.get_running_loop()
-                today = _date.today()
-                # Najblizszy poniedzialek (lub dzisiaj jesli to poniedzialek)
-                monday = today - timedelta(days=today.weekday())
-
-                lessons = []
-                for week_offset in range(weeks_ahead):
-                    target_monday = monday + timedelta(weeks=week_offset)
-                    monday_dt = _dt.combine(target_monday, _dt.min.time())
-                    try:
-                        week = await loop.run_in_executor(
-                            None, get_timetable, client, monday_dt
-                        )
-                    except Exception as ex:
-                        _LOGGER.debug(
-                            "Timetable fetch failed for %s: %s", target_monday, ex
-                        )
-                        continue
-                    # week to List[List[Period]] - lista dni, kazdy dzien lista lekcji
-                    for day_periods in week:
-                        for period in day_periods:
-                            try:
-                                # Filtruj okienka (subject pusty)
-                                if not period.subject:
-                                    continue
-                                lessons.append({
-                                    "subject": period.subject,
-                                    "teacher_and_classroom": period.teacher_and_classroom or "",
-                                    "date": period.date or "",
-                                    "time_from": period.date_from or "",
-                                    "time_to": period.date_to or "",
-                                    "weekday": period.weekday or "",
-                                    "lesson_number": period.number,
-                                    "info": dict(period.info) if period.info else {},
-                                })
-                            except AttributeError:
+        def _work(client: Client) -> list[dict[str, Any]]:
+            lessons: list[dict[str, Any]] = []
+            for week_offset in range(weeks_ahead):
+                target_monday = monday + timedelta(weeks=week_offset)
+                monday_dt = _dt.combine(target_monday, _dt.min.time())
+                try:
+                    week = get_timetable(client, monday_dt)
+                except TokenError:
+                    raise
+                except Exception as ex:
+                    _LOGGER.debug(
+                        "Timetable fetch failed for %s: %s", target_monday, ex
+                    )
+                    continue
+                # week to List[List[Period]] - lista dni, kazdy dzien lista lekcji
+                for day_periods in week:
+                    for period in day_periods:
+                        try:
+                            if not period.subject:
                                 continue
+                            lessons.append({
+                                "subject": period.subject,
+                                "teacher_and_classroom": period.teacher_and_classroom or "",
+                                "date": period.date or "",
+                                "time_from": period.date_from or "",
+                                "time_to": period.date_to or "",
+                                "weekday": period.weekday or "",
+                                "lesson_number": period.number,
+                                "info": dict(period.info) if period.info else {},
+                            })
+                        except AttributeError:
+                            continue
 
-                # Sortuj po dacie + godzinie
-                lessons.sort(key=lambda l: (l["date"], l.get("time_from") or ""))
-                return lessons
+            lessons.sort(key=lambda l: (l["date"], l.get("time_from") or ""))
+            return lessons
 
-            except TokenError:
-                _LOGGER.warning(
-                    "Token expired fetching timetable (attempt %d/2), re-authenticating...",
-                    attempt + 1,
-                )
-                self._reset_auth()
-                if attempt == 1:
-                    _LOGGER.error("Failed to get timetable after re-authentication.")
-                    return None
-            except Exception:
-                _LOGGER.exception(
-                    "Failed to get timetable (attempt %d/2)", attempt + 1
-                )
-                self._reset_auth()
-                if attempt == 1:
-                    return None
-        return None
+        return await self._with_retry("timetable", _work)
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: LibrusConfigEntry) -> bool:
