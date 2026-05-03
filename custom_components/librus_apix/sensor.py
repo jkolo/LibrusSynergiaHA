@@ -67,17 +67,8 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Konfiguracja platformy czujnikow Librus APIX."""
-    # Coordinator zostal stworzony w __init__.async_setup_entry — uzywamy go.
-    # Fallback (legacy install): jesli go brak, tworzymy lokalnie.
-    coord_key = f"{config_entry.entry_id}_coordinator"
-    coordinator: LibrusDataUpdateCoordinator
-    if coord_key in hass.data.get(DOMAIN, {}):
-        coordinator = hass.data[DOMAIN][coord_key]
-    else:
-        client = hass.data[DOMAIN][config_entry.entry_id]
-        coordinator = LibrusDataUpdateCoordinator(hass, client)
-        await coordinator.async_config_entry_first_refresh()
-        hass.data[DOMAIN][coord_key] = coordinator
+    # Coordinator stworzony w __init__.async_setup_entry, dostepny przez runtime_data.
+    coordinator: LibrusDataUpdateCoordinator = config_entry.runtime_data.coordinator
 
     entities: list[SensorEntity] = [
         LibrusUczenSensor(coordinator, config_entry),
