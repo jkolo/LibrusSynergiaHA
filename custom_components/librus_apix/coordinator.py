@@ -99,6 +99,8 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     async def _async_update_data(self) -> dict[str, Any]:
         """Pobierz aktualne dane z API Librus."""
+        from . import LibrusAuthError  # local import to avoid circular at module import
+
         current_sem = 1 if date.today().month >= 9 else 2
 
         try:
@@ -201,6 +203,11 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
             return result
 
+        except LibrusAuthError as err:
+            # Hasło prawdopodobnie zmienione w Librusie — startujemy reauth flow.
+            raise ConfigEntryAuthFailed(
+                "Authentication permanently failed — please re-enter password."
+            ) from err
         except UpdateFailed:
             raise
         except Exception as err:

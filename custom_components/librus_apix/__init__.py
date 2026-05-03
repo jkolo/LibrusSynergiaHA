@@ -46,6 +46,16 @@ class LibrusRuntimeData:
 type LibrusConfigEntry = ConfigEntry[LibrusRuntimeData]
 
 
+class LibrusAuthError(Exception):
+    """Raised when authentication permanently fails (likely password changed).
+
+    Distinguished from a transient maintenance failure: emitted only after
+    we've re-authenticated unsuccessfully twice in a row for the same fetch.
+    Coordinator catches this and converts it to ConfigEntryAuthFailed so HA
+    starts the reauth flow.
+    """
+
+
 def _current_semester() -> int:
     """Return current Polish school-year semester (1 or 2).
 
@@ -96,15 +106,26 @@ class LibrusApiClient:
     ) -> T | None:
         """Run a sync librus-apix call with auth retry.
 
-        `work` runs in the default executor. If it raises TokenError we
-        re-authenticate and try once more; any other exception is logged
-        and the second attempt also returns None.
+        `work` runs in the default executor. Behaviour:
+
+        - On TokenError (or auth returning False): we re-authenticate and
+          try once more. After the second TokenError we raise
+          LibrusAuthError — the coordinator translates it into
+          ConfigEntryAuthFailed so HA starts a reauth flow.
+        - On any other exception we log and return None — that's treated
+          as transient failure and the coordinator falls back to cache.
         """
+        auth_failures = 0
         for attempt in range(2):
             try:
                 if not self._client or not self._token:
                     if not await self.async_authenticate():
-                        return None
+                        auth_failures += 1
+                        if auth_failures >= 2:
+                            raise LibrusAuthError(
+                                f"Authentication failed twice fetching {label}"
+                            )
+                        continue
                 loop = asyncio.get_running_loop()
                 return await loop.run_in_executor(None, work, self._client)
             except TokenError:
@@ -114,8 +135,15 @@ class LibrusApiClient:
                 )
                 self._reset_auth()
                 if attempt == 1:
-                    _LOGGER.error("Failed to get %s after re-authentication.", label)
-                    return None
+                    _LOGGER.error(
+                        "TokenError persisted after re-auth fetching %s — "
+                        "treating as auth failure", label,
+                    )
+                    raise LibrusAuthError(
+                        f"Token expired persistently fetching {label}"
+                    )
+            except LibrusAuthError:
+                raise
             except Exception:
                 _LOGGER.exception(
                     "Failed to get %s (attempt %d/2)", label, attempt + 1
