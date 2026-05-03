@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -221,6 +222,82 @@ async def test_repair_issue_lib_outdated_clears_on_recovery(
     await hass.async_block_till_done()
 
     assert registry.async_get_issue(DOMAIN, issue_id) is None
+
+
+async def test_random_order_uses_injected_rng(
+    hass: HomeAssistant, fake_client, monkeypatch
+):
+    """Coordinator z deterministycznym Random(42) odpala fetchery w predictable kolejnosci."""
+    import random as _random
+
+    coordinator = LibrusDataUpdateCoordinator(
+        hass, fake_client, rng=_random.Random(42)
+    )
+
+    # Track call order via spy on each fetcher.
+    call_order: list[str] = []
+
+    async def _record(name: str, original):
+        async def wrapper(*args, **kwargs):
+            call_order.append(name)
+            return await original(*args, **kwargs)
+        return wrapper
+
+    fake_client.async_get_student_information = await _record(
+        "student_info", fake_client.async_get_student_information
+    )
+    fake_client.async_get_grades = await _record("grades", fake_client.async_get_grades)
+    fake_client.async_get_messages = await _record("messages", fake_client.async_get_messages)
+    fake_client.async_get_schedule_events = await _record(
+        "schedule", fake_client.async_get_schedule_events
+    )
+    fake_client.async_get_timetable_events = await _record(
+        "timetable", fake_client.async_get_timetable_events
+    )
+
+    await coordinator.async_refresh()
+    await hass.async_block_till_done()
+
+    # Each fetcher called exactly once.
+    assert sorted(call_order) == sorted(
+        ["student_info", "grades", "messages", "schedule", "timetable"]
+    )
+    # Order is NOT the natural dict order (would be the listing above) —
+    # the shuffle should produce something different. Lock-in: with seed 42,
+    # the order is deterministic and we just check that *some* shuffle happened.
+    assert call_order != ["student_info", "grades", "messages", "schedule", "timetable"]
+
+
+async def test_pause_invoked_between_endpoints(hass: HomeAssistant, fake_client):
+    """Po kazdym z pierwszych N-1 endpointow leci asyncio.sleep z jitter pause."""
+    import random as _random
+    from unittest.mock import patch
+
+    coordinator = LibrusDataUpdateCoordinator(
+        hass, fake_client, rng=_random.Random(42)
+    )
+
+    # Count only the calls our coordinator makes (deterministic 0.0 from
+    # the jitter_pause_seconds patch in the autouse fixture). Other library
+    # code may also call asyncio.sleep, so we filter by argument.
+    pause_seconds: list[float] = []
+    real_sleep = asyncio.sleep
+
+    async def spy_sleep(seconds, *args, **kwargs):
+        # Sentinel value 0.0001 from the no_human_pauses fixture marks
+        # our coordinator's inter-fetch pauses; ignore other sleeps.
+        if seconds == 0.0001:
+            pause_seconds.append(seconds)
+        return await real_sleep(seconds, *args, **kwargs)
+
+    with patch(
+        "custom_components.librus_apix.coordinator.asyncio.sleep", spy_sleep
+    ):
+        await coordinator.async_refresh()
+        await hass.async_block_till_done()
+
+    # 5 fetcherow → 4 pauzy między nimi.
+    assert len(pause_seconds) == 4
 
 
 async def test_repair_issue_auth_failed_on_libraryauth_error(
