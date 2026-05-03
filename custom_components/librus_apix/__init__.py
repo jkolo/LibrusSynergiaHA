@@ -205,22 +205,36 @@ class LibrusApiClient:
 
     async def async_get_student_information(self):
         """Get student information from Librus."""
-        try:
-            if not self._client or not self._token:
-                if not await self.async_authenticate():
+        from librus_apix.student_information import get_student_information
+
+        for attempt in range(2):
+            try:
+                if not self._client or not self._token:
+                    if not await self.async_authenticate():
+                        return None
+
+                loop = asyncio.get_running_loop()
+                return await loop.run_in_executor(
+                    None, get_student_information, self._client
+                )
+
+            except TokenError:
+                _LOGGER.warning(
+                    "Token expired fetching student info (attempt %d/2), re-authenticating...",
+                    attempt + 1,
+                )
+                self._reset_auth()
+                if attempt == 1:
+                    _LOGGER.error("Failed to get student info after re-authentication.")
                     return None
-
-            from librus_apix.student_information import get_student_information
-
-            loop = asyncio.get_running_loop()
-            return await loop.run_in_executor(None, get_student_information, self._client)
-
-        except Exception as ex:
-            _LOGGER.error(
-                "Failed to get student information: %s\n%s", ex, traceback.format_exc()
-            )
-            self._reset_auth()
-            return None
+            except Exception as ex:
+                _LOGGER.error(
+                    "Failed to get student information (attempt %d/2): %s\n%s",
+                    attempt + 1, ex, traceback.format_exc(),
+                )
+                self._reset_auth()
+                if attempt == 1:
+                    return None
 
     async def async_get_schedule_events(
         self, months_ahead: int = 2, only_exams: bool = True

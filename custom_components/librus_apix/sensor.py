@@ -422,11 +422,12 @@ class LibrusPrzedmiotSensor(CoordinatorEntity, SensorEntity):
         return _device_info(self.coordinator, self._config_entry)
 
     @property
-    def native_value(self) -> Optional[str]:
+    def native_value(self) -> Optional[int]:
+        # State HA jest ograniczony do 255 znakow - przy duzej liczbie ocen
+        # zlaczona lista by sie ucinala. Trzymamy liczbe ocen jako state,
+        # pelna lista jest w atrybucie "lista_ocen".
         oceny = (self.coordinator.data or {}).get("oceny_wg_przedmiotu", {}).get(self._subject, [])
-        if not oceny:
-            return None
-        return ", ".join(g["ocena"] for g in oceny)
+        return len(oceny) if oceny else None
 
     @property
     def extra_state_attributes(self) -> Dict[str, Any]:
@@ -565,7 +566,9 @@ class LibrusWiadomosciSensor(CoordinatorEntity, SensorEntity):
 
     @property
     def extra_state_attributes(self) -> Dict[str, Any]:
-        msgs = (self.coordinator.data or {}).get("wiadomosci", [])[:5]
+        # Pelna lista (do 10) zeby liczniki byly spojne z native_value;
+        # widok ograniczamy tylko dla pola "wiadomosci".
+        all_msgs = (self.coordinator.data or {}).get("wiadomosci", [])
         return {
             "wiadomosci": [
                 {
@@ -576,10 +579,10 @@ class LibrusWiadomosciSensor(CoordinatorEntity, SensorEntity):
                     "jest_nowa": m.get("jest_nowa", False),
                     "ma_zalacznik": m.get("has_attachment", False),
                 }
-                for m in msgs
+                for m in all_msgs[:5]
             ],
-            "liczba_nieprzeczytanych": sum(1 for m in msgs if m.get("unread", False)),
-            "sa_nowe_wiadomosci": any(m.get("jest_nowa", False) for m in msgs),
+            "liczba_nieprzeczytanych": sum(1 for m in all_msgs if m.get("unread", False)),
+            "sa_nowe_wiadomosci": any(m.get("jest_nowa", False) for m in all_msgs),
         }
 
 

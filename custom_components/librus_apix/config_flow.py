@@ -54,8 +54,14 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     ) -> FlowResult:
         """Handle the initial step."""
         errors = {}
-        
+
         if user_input is not None:
+            # Zapobiegamy duplikatom config entry dla tego samego loginu.
+            # Bez tego mozna bylo dodac to samo konto wielokrotnie i dostac
+            # rownolegle kompleksy encji sensora.
+            await self.async_set_unique_id(user_input[CONF_USERNAME].lower())
+            self._abort_if_unique_id_configured()
+
             try:
                 info = await validate_input(self.hass, user_input)
             except ValueError:
@@ -67,7 +73,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 return self.async_create_entry(title=info["title"], data=user_input)
 
         return self.async_show_form(
-            step_id="user", 
-            data_schema=STEP_USER_DATA_SCHEMA, 
+            step_id="user",
+            data_schema=STEP_USER_DATA_SCHEMA,
             errors=errors
         )
