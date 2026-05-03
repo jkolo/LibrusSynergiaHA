@@ -104,6 +104,12 @@
       },
       "timetable": {
         "name": "Plan lekcji"
+      },
+      "attendance": {
+        "name": "Obecności"
+      },
+      "grades_calendar": {
+        "name": "Oceny"
       }
     },
     "event": {
