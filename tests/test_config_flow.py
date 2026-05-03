@@ -17,11 +17,26 @@ from custom_components.librus_apix.const import DOMAIN
 
 @pytest.fixture
 def mock_validate_input():
-    """Patch validate_input to avoid real Librus calls."""
-    with patch(
-        "custom_components.librus_apix.config_flow.validate_input",
-        new=AsyncMock(return_value={"title": "Librus APIX (test_user)"}),
-    ) as m:
+    """Patch validate_input AND LibrusApiClient — config flow create entry
+    triggers async_setup_entry which would otherwise hit the network.
+    """
+    with (
+        patch(
+            "custom_components.librus_apix.config_flow.validate_input",
+            new=AsyncMock(return_value={"title": "Librus APIX (test_user)"}),
+        ) as m,
+        patch(
+            "custom_components.librus_apix.LibrusApiClient", autospec=True
+        ) as client_cls,
+    ):
+        instance = client_cls.return_value
+        instance.username = "test_user"
+        instance.async_authenticate = AsyncMock(return_value=True)
+        instance.async_get_student_information = AsyncMock(return_value=None)
+        instance.async_get_grades = AsyncMock(return_value=[])
+        instance.async_get_messages = AsyncMock(return_value=[])
+        instance.async_get_schedule_events = AsyncMock(return_value=[])
+        instance.async_get_timetable_events = AsyncMock(return_value=[])
         yield m
 
 
