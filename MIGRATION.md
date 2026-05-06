@@ -317,3 +317,84 @@ Temat: {{ msg.temat }}
 Od: {{ msg.sender }}
 Temat: {{ msg.title }}
 ```
+
+---
+
+# Migracja v3.0 → v3.1
+
+v3.1.0 jest **w pełni additive** — żadne istniejące encje, atrybuty ani eventy nie znikają ani się nie zmieniają. Wystarczy zaktualizować integrację przez HACS.
+
+**Wymaga HA 2024.2.0+** (service `fetch_message_content` używa `SupportsResponse.ONLY`).
+
+## Nowe ficzery v3.1
+
+### Lokalny mark-as-read
+
+Trzy nowe serwisy zarządzają lokalną flagą `is_read_in_ha` per wiadomość:
+
+```yaml
+# Oznacz jako przeczytaną (stan przeżywa restart HA; nie wpływa na Librusa)
+service: librus_apix.mark_message_read
+data:
+  entry: "TWÓJ_ENTRY_ID"
+  message_href: "12345"
+
+# Cofnij oznaczenie
+service: librus_apix.mark_message_unread
+data:
+  entry: "TWÓJ_ENTRY_ID"
+  message_href: "12345"
+
+# Wyczyść wszystkie flagi dla konta
+service: librus_apix.clear_read_messages
+data:
+  entry: "TWÓJ_ENTRY_ID"
+```
+
+`message_href` to numeryczny ID widoczny w atrybucie sensora wiadomości:
+```
+{{ state_attr('sensor.librus_jan_wiadomosci', 'messages')[0].href }}
+```
+
+### Nowe atrybuty sensora wiadomości
+
+`sensor.<dziecko>_wiadomosci` ma teraz:
+- `messages[].href` — numeryczny ID wiadomości
+- `messages[].is_read_in_ha` — lokalnie oznaczona jako przeczytana
+- `unread_count_locally` — liczba nieprzeczytanych po odjęciu lokalnie oznaczonych
+
+`sensor.<dziecko>_latest_message` analogicznie: `href` + `is_read_in_ha`.
+
+### Pobieranie treści wiadomości
+
+```yaml
+service: librus_apix.fetch_message_content
+data:
+  entry: "TWÓJ_ENTRY_ID"
+  message_href: "12345"
+response_variable: tresc
+```
+
+Zwraca `{content, author, title, date}` gdzie `content` to inner HTML treści wiadomości.
+
+> **UWAGA PRIVACY:** pobranie treści SERVER-SIDE oznacza wiadomość jako przeczytaną
+> w Librusie (efekt uboczny Librusa — nie do uniknięcia). Drugi rodzic na osobnym
+> koncie Librus nie jest dotknięty. Service automatycznie ustawia też `is_read_in_ha=True`.
+
+### Baner powiadomień (opt-in)
+
+W **Settings → Devices & Services → Librus → Configure** pojawia się checkbox
+**"Pokazuj baner powiadomienia przy nowej wiadomości"**.
+
+Po włączeniu: każda nowa wiadomość (nie przy pierwszym uruchomieniu) tworzy
+`persistent_notification` ze stabilnym ID — `mark_message_read` automatycznie go odrzuca.
+
+### Flag `initial` w bus evencie
+
+`librus_apix_nowa_wiadomosc` (nowy event, zastępuje legacy w automatyzacjach)
+ma teraz pole `initial: bool`:
+- `initial: true` — wiadomości istniejące przy starcie/restarcie HA
+- `initial: false` — nowa wiadomość wykryta w trakcie działania
+
+Użyj `condition: "{{ not trigger.event.data.initial }}"` żeby uniknąć powiadomień
+przy każdym restarcie HA.
