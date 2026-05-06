@@ -27,6 +27,7 @@ from .const import (
     DEFAULT_QUIET_HOURS_ENABLED,
     DEFAULT_QUIET_START,
     DOMAIN,
+    EVENT_NOWA_WIADOMOSC,
     OPT_BASE_MINUTES,
     OPT_HUMANIZE,
     OPT_JITTER,
@@ -45,6 +46,7 @@ from .humanize import (
 
 if TYPE_CHECKING:
     from . import LibrusApiClient
+    from ._message_store import ReadMessagesStore
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -215,6 +217,7 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 a stable but distinct order pattern.
         """
         self.client = client
+        self.read_messages_store: ReadMessagesStore | None = None
         self._seen_message_hrefs: OrderedDict[str, None] = OrderedDict()
         self._seen_grade_ids: OrderedDict[tuple, None] = OrderedDict()
         self._seen_exam_ids: OrderedDict[tuple, None] = OrderedDict()
@@ -558,12 +561,23 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 "current_semester": current_semester,
             }
 
-            # First refresh: only seed seen-sets, do not enqueue events to
-            # avoid spurious notifications for everything that already exists.
+            # First refresh: seed seen-sets and fire bus events with initial=True
+            # (IMAP-style — lets automations distinguish startup flood from
+            # genuinely new messages). Do NOT enqueue to _pending_events.
             if self._first_run:
                 self._first_run = False
                 for msg in annotated_messages:
-                    _add_lru(self._seen_message_hrefs, msg["href"])
+                    href = msg.get("href", "")
+                    _add_lru(self._seen_message_hrefs, href)
+                    if href:
+                        self.hass.bus.async_fire(EVENT_NOWA_WIADOMOSC, {
+                            "sender": msg.get("author", ""),
+                            "title": msg.get("title", ""),
+                            "date": msg.get("date", ""),
+                            "href": href,
+                            "has_attachment": msg.get("has_attachment", False),
+                            "initial": True,
+                        })
                 for grade in grades:
                     _add_lru(
                         self._seen_grade_ids,
@@ -594,6 +608,12 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 self._enqueue_events(
                     annotated_messages, grades, exams_list,
                     announcements_list, attendance_list,
+                )
+
+            if self.read_messages_store is not None:
+                active_hrefs = {m.get("href") for m in annotated_messages if m.get("href")}
+                self.hass.async_create_task(
+                    self.read_messages_store.async_purge_stale(active_hrefs)
                 )
 
             # Successful refresh: clear the auth repair issue if present.
@@ -643,12 +663,16 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             if href and href not in self._seen_message_hrefs:
                 _add_lru(self._seen_message_hrefs, href)
                 _LOGGER.debug("New message: %s", msg.get("title"))
-                self._pending_events[EVENT_KEY_NEW_MESSAGE] = {
+                payload: dict[str, Any] = {
                     "sender": msg.get("author", ""),
                     "title": msg.get("title", ""),
                     "date": msg.get("date", ""),
+                    "href": href,
                     "has_attachment": msg.get("has_attachment", False),
+                    "initial": False,
                 }
+                self._pending_events[EVENT_KEY_NEW_MESSAGE] = payload
+                self.hass.bus.async_fire(EVENT_NOWA_WIADOMOSC, payload)
 
         for grade in grades:
             grade_id = (grade["subject"], grade["date"], grade["grade"])
@@ -725,6 +749,12 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """Mark fresh messages and return the list (in-place tagged copy)."""
         result = []
         for msg in messages or []:
+            href = msg.get("href", "")
             msg["is_recent"] = _is_recent(msg.get("date", ""))
+            msg["is_read_in_ha"] = (
+                self.read_messages_store is not None
+                and bool(href)
+                and self.read_messages_store.is_read(href)
+            )
             result.append(msg)
         return result

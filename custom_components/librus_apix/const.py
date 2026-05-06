@@ -31,3 +31,16 @@ DEFAULT_QUIET_START = "22:30"
 DEFAULT_QUIET_END = "06:30"
 DEFAULT_OFF_SCHOOL_MULTIPLIER = 6.0
 DEFAULT_HUMANIZE = True
+
+# Message notification opt-in
+OPT_MESSAGE_NOTIFY = "message_notify"
+DEFAULT_MESSAGE_NOTIFY = False
+
+# Service names
+SERVICE_MARK_MESSAGE_READ = "mark_message_read"
+SERVICE_MARK_MESSAGE_UNREAD = "mark_message_unread"
+SERVICE_CLEAR_READ_MESSAGES = "clear_read_messages"
+SERVICE_FETCH_MESSAGE_CONTENT = "fetch_message_content"
+
+# Bus events
+EVENT_NOWA_WIADOMOSC = "librus_apix_nowa_wiadomosc"

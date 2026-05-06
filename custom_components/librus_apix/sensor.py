@@ -140,11 +140,17 @@ def _attrs_messages(data: dict[str, Any]) -> dict[str, Any]:
                 "date": m["date"],
                 "unread": m.get("unread", False),
                 "is_recent": m.get("is_recent", False),
+                "is_read_in_ha": m.get("is_read_in_ha", False),
                 "has_attachment": m.get("has_attachment", False),
+                "href": m.get("href", ""),
             }
             for m in all_msgs[:5]
         ],
         "unread_count": sum(1 for m in all_msgs if m.get("unread", False)),
+        "unread_count_locally": sum(
+            1 for m in all_msgs
+            if m.get("unread", False) and not m.get("is_read_in_ha", False)
+        ),
         "has_new_messages": any(m.get("is_recent", False) for m in all_msgs),
     }
 
@@ -217,6 +223,8 @@ def _attrs_latest_message(data: dict[str, Any]) -> dict[str, Any]:
         "unread": bool(msg.get("unread", False)),
         "has_attachment": bool(msg.get("has_attachment", False)),
         "is_recent": bool(msg.get("is_recent", False)),
+        "is_read_in_ha": bool(msg.get("is_read_in_ha", False)),
+        "href": msg.get("href", ""),
     }
 
 

@@ -133,6 +133,15 @@
   "exceptions": {
     "auth_failed": {
       "message": "Authentication permanently failed — please re-enter password."
+    },
+    "invalid_entry": {
+      "message": "Config entry {entry_id} not found or not loaded."
+    },
+    "entry_not_initialized": {
+      "message": "Config entry is not fully initialized."
+    },
+    "message_not_found": {
+      "message": "Message with href '{href}' not found in current data."
     }
   },
   "issues": {

@@ -11,9 +11,12 @@ from dataclasses import dataclass
 from datetime import date as _date, datetime as _dt, timedelta
 from typing import Any, TypeVar
 
-from homeassistant.config_entries import ConfigEntry
+import voluptuous as vol
+from homeassistant.config_entries import ConfigEntry, ConfigEntryState
 from homeassistant.const import CONF_PASSWORD, CONF_USERNAME
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, ServiceCall
+from homeassistant.exceptions import ServiceValidationError
+from homeassistant.helpers import config_validation as cv
 from librus_apix import urls as librus_urls
 from librus_apix.announcements import get_announcements
 from librus_apix.attendance import get_attendance, get_attendance_frequency
@@ -25,7 +28,15 @@ from librus_apix.schedule import get_schedule
 from librus_apix.student_information import get_student_information
 from librus_apix.timetable import get_timetable
 
-from .const import DEFAULT_HUMANIZE, DOMAIN, OPT_HUMANIZE
+from ._message_store import ReadMessagesStore
+from .const import (
+    DEFAULT_HUMANIZE,
+    DOMAIN,
+    OPT_HUMANIZE,
+    SERVICE_CLEAR_READ_MESSAGES,
+    SERVICE_MARK_MESSAGE_READ,
+    SERVICE_MARK_MESSAGE_UNREAD,
+)
 from .coordinator import LibrusDataUpdateCoordinator
 from .humanize import build_headers, pick_user_agent
 
@@ -565,6 +576,89 @@ async def _async_options_updated(hass: HomeAssistant, entry: LibrusConfigEntry) 
     await hass.config_entries.async_reload(entry.entry_id)
 
 
+def _setup_services(hass: HomeAssistant) -> None:
+    """Register mark-as-read services (no-op if already registered)."""
+    if hass.services.has_service(DOMAIN, SERVICE_MARK_MESSAGE_READ):
+        return
+
+    _schema_with_href = vol.Schema({
+        vol.Required("entry"): cv.string,
+        vol.Required("message_href"): cv.string,
+    })
+    _schema_entry_only = vol.Schema({
+        vol.Required("entry"): cv.string,
+    })
+
+    def _resolve_coordinator(entry_id: str) -> LibrusDataUpdateCoordinator:
+        entry = hass.config_entries.async_get_entry(entry_id)
+        if entry is None or entry.state is not ConfigEntryState.LOADED:
+            raise ServiceValidationError(
+                translation_domain=DOMAIN,
+                translation_key="invalid_entry",
+                translation_placeholders={"entry_id": entry_id},
+            )
+        runtime = getattr(entry, "runtime_data", None)
+        if runtime is None:
+            raise ServiceValidationError(
+                translation_domain=DOMAIN,
+                translation_key="entry_not_initialized",
+            )
+        return runtime.coordinator
+
+    def _validate_href(coordinator: LibrusDataUpdateCoordinator, href: str) -> dict:
+        msgs = (coordinator.data or {}).get("messages") or []
+        msg = next((m for m in msgs if m.get("href") == href), None)
+        if msg is None:
+            raise ServiceValidationError(
+                translation_domain=DOMAIN,
+                translation_key="message_not_found",
+                translation_placeholders={"href": href},
+            )
+        return msg
+
+    async def _mark_read(call: ServiceCall) -> None:
+        entry_id: str = call.data["entry"]
+        href: str = call.data["message_href"]
+        coordinator = _resolve_coordinator(entry_id)
+        _validate_href(coordinator, href)
+        await coordinator.read_messages_store.async_mark_read(href)
+        for m in (coordinator.data or {}).get("messages", []):
+            if m.get("href") == href:
+                m["is_read_in_ha"] = True
+                break
+        coordinator.async_set_updated_data(coordinator.data)
+
+    async def _mark_unread(call: ServiceCall) -> None:
+        entry_id: str = call.data["entry"]
+        href: str = call.data["message_href"]
+        coordinator = _resolve_coordinator(entry_id)
+        _validate_href(coordinator, href)
+        await coordinator.read_messages_store.async_mark_unread(href)
+        for m in (coordinator.data or {}).get("messages", []):
+            if m.get("href") == href:
+                m["is_read_in_ha"] = False
+                break
+        coordinator.async_set_updated_data(coordinator.data)
+
+    async def _clear_read(call: ServiceCall) -> None:
+        entry_id: str = call.data["entry"]
+        coordinator = _resolve_coordinator(entry_id)
+        await coordinator.read_messages_store.async_clear()
+        for m in (coordinator.data or {}).get("messages", []):
+            m["is_read_in_ha"] = False
+        coordinator.async_set_updated_data(coordinator.data)
+
+    hass.services.async_register(
+        DOMAIN, SERVICE_MARK_MESSAGE_READ, _mark_read, schema=_schema_with_href,
+    )
+    hass.services.async_register(
+        DOMAIN, SERVICE_MARK_MESSAGE_UNREAD, _mark_unread, schema=_schema_with_href,
+    )
+    hass.services.async_register(
+        DOMAIN, SERVICE_CLEAR_READ_MESSAGES, _clear_read, schema=_schema_entry_only,
+    )
+
+
 async def async_setup_entry(hass: HomeAssistant, entry: LibrusConfigEntry) -> bool:
     """Set up Librus APIX from a config entry."""
     # Seed RNG by entry_id so each child gets a stable but distinct UA
@@ -587,6 +681,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: LibrusConfigEntry) -> bo
     coordinator = LibrusDataUpdateCoordinator(
         hass, client, config_entry=entry, rng=coord_rng
     )
+
+    read_store = ReadMessagesStore(hass, entry.entry_id)
+    await read_store.async_load()
+    coordinator.read_messages_store = read_store
+
     await coordinator.async_config_entry_first_refresh()
 
     # Custom scheduler kicks off here so coordinator.data["schedule"] is
@@ -595,6 +694,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: LibrusConfigEntry) -> bo
     coordinator.schedule_next_refresh()
 
     entry.runtime_data = LibrusRuntimeData(client=client, coordinator=coordinator)
+
+    _setup_services(hass)
     entry.async_on_unload(entry.add_update_listener(_async_options_updated))
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)

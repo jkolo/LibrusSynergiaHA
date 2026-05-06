@@ -1,0 +1,50 @@
+mark_message_read:
+  name: Oznacz wiadomość jako przeczytaną (lokalnie)
+  description: >
+    Oznacza wiadomość Librus jako przeczytaną w Home Assistant. NIE wpływa
+    na status w Librusie — w przeglądarce dziennika dalej będzie widoczna
+    jako nowa. Stan przeżywa restart HA.
+  fields:
+    entry:
+      name: Konto Librus
+      required: true
+      selector:
+        config_entry:
+          integration: librus_apix
+    message_href:
+      name: Identyfikator wiadomości (href)
+      description: >
+        Numeryczny ID wiadomości — widoczny w atrybucie `href` sensora
+        wiadomości (np. state_attr('sensor.librus_jan_kowalski_wiadomosci',
+        'messages')[0].href).
+      required: true
+      example: "12345"
+      selector:
+        text:
+
+mark_message_unread:
+  name: Cofnij lokalne oznaczenie jako przeczytanej
+  description: Usuwa wiadomość z lokalnej listy "przeczytane" w Home Assistant.
+  fields:
+    entry:
+      name: Konto Librus
+      required: true
+      selector:
+        config_entry:
+          integration: librus_apix
+    message_href:
+      name: Identyfikator wiadomości (href)
+      required: true
+      selector:
+        text:
+
+clear_read_messages:
+  name: Wyczyść wszystkie lokalne oznaczenia
+  description: Usuwa wszystkie lokalne flagi "przeczytane" dla wybranego konta.
+  fields:
+    entry:
+      name: Konto Librus
+      required: true
+      selector:
+        config_entry:
+          integration: librus_apix

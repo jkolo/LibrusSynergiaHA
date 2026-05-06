@@ -133,6 +133,15 @@
   "exceptions": {
     "auth_failed": {
       "message": "Uwierzytelnianie nie powiodło się — wprowadź hasło ponownie."
+    },
+    "invalid_entry": {
+      "message": "Wpis konfiguracji {entry_id} nie istnieje lub nie jest załadowany."
+    },
+    "entry_not_initialized": {
+      "message": "Wpis konfiguracji nie jest jeszcze w pełni zainicjowany."
+    },
+    "message_not_found": {
+      "message": "Wiadomość o identyfikatorze '{href}' nie istnieje w bieżących danych."
     }
   },
   "issues": {
