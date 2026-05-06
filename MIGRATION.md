@@ -398,3 +398,28 @@ ma teraz pole `initial: bool`:
 
 Użyj `condition: "{{ not trigger.event.data.initial }}"` żeby uniknąć powiadomień
 przy każdym restarcie HA.
+
+---
+
+# Migracja v3.1 → v3.2
+
+v3.2.0 jest **w pełni additive** — backend bez zmian, dochodzi tylko karta Lovelace.
+
+## Nowe ficzery v3.2
+
+### Karta Lovelace `librus-messages-card`
+
+Dedykowana karta dostępna przez HACS (kategoria **Frontend / Lovelace**).
+Instalacja, konfiguracja i przykłady: [frontend/README.md](frontend/README.md).
+
+```yaml
+type: custom:librus-messages-card
+entity: sensor.librus_jan_kowalski_wiadomosci
+entry_id: TWÓJ_ENTRY_ID
+```
+
+Funkcje karty:
+- Lista wiadomości z nadawcą, tytułem, datą i badge "nieprzeczytana".
+- Inline podgląd treści (sanityzowany HTML — bezpieczny rendering).
+- Przycisk "Oznacz jako przeczytaną" per wiadomość.
+- Filtr "tylko nieprzeczytane".
