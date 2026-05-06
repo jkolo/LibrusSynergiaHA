@@ -10,6 +10,9 @@ from collections.abc import Awaitable, Callable
 from datetime import date, datetime, time, timedelta
 from typing import TYPE_CHECKING, Any
 
+import hashlib
+
+from homeassistant.components import persistent_notification
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import CALLBACK_TYPE, HomeAssistant, callback
 from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
@@ -22,6 +25,7 @@ from .const import (
     DEFAULT_BASE_MINUTES,
     DEFAULT_HUMANIZE,
     DEFAULT_JITTER,
+    DEFAULT_MESSAGE_NOTIFY,
     DEFAULT_OFF_SCHOOL_MULTIPLIER,
     DEFAULT_QUIET_END,
     DEFAULT_QUIET_HOURS_ENABLED,
@@ -31,6 +35,7 @@ from .const import (
     OPT_BASE_MINUTES,
     OPT_HUMANIZE,
     OPT_JITTER,
+    OPT_MESSAGE_NOTIFY,
     OPT_OFF_SCHOOL_MULTIPLIER,
     OPT_QUIET_END,
     OPT_QUIET_HOURS_ENABLED,
@@ -673,6 +678,22 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 }
                 self._pending_events[EVENT_KEY_NEW_MESSAGE] = payload
                 self.hass.bus.async_fire(EVENT_NOWA_WIADOMOSC, payload)
+                if (
+                    self.config_entry is not None
+                    and self.config_entry.options.get(
+                        OPT_MESSAGE_NOTIFY, DEFAULT_MESSAGE_NOTIFY
+                    )
+                ):
+                    href_hash = hashlib.sha1(href.encode()).hexdigest()[:10]
+                    notification_id = (
+                        f"librus_apix_msg_{self.config_entry.entry_id}_{href_hash}"
+                    )
+                    persistent_notification.async_create(
+                        self.hass,
+                        message=f"**{msg.get('author', '')}**: {msg.get('title', '')}",
+                        title="Librus: nowa wiadomość",
+                        notification_id=notification_id,
+                    )
 
         for grade in grades:
             grade_id = (grade["subject"], grade["date"], grade["grade"])

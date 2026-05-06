@@ -48,7 +48,8 @@
           "quiet_start": "Quiet hours start (HH:MM)",
           "quiet_end": "Quiet hours end (HH:MM)",
           "off_school_multiplier": "Multiplier on weekends, holidays and breaks",
-          "humanize": "Enable human-like sync (off = legacy fixed cadence)"
+          "humanize": "Enable human-like sync (off = legacy fixed cadence)",
+          "message_notify": "Show notification banner for new messages (persistent_notification)"
         }
       }
     }

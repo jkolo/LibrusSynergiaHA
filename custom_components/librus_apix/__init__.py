@@ -617,6 +617,9 @@ def _setup_services(hass: HomeAssistant) -> None:
         return msg
 
     async def _mark_read(call: ServiceCall) -> None:
+        import hashlib
+        from homeassistant.components import persistent_notification
+
         entry_id: str = call.data["entry"]
         href: str = call.data["message_href"]
         coordinator = _resolve_coordinator(entry_id)
@@ -627,6 +630,9 @@ def _setup_services(hass: HomeAssistant) -> None:
                 m["is_read_in_ha"] = True
                 break
         coordinator.async_set_updated_data(coordinator.data)
+        href_hash = hashlib.sha1(href.encode()).hexdigest()[:10]
+        notification_id = f"librus_apix_msg_{entry_id}_{href_hash}"
+        persistent_notification.async_dismiss(hass, notification_id)
 
     async def _mark_unread(call: ServiceCall) -> None:
         entry_id: str = call.data["entry"]

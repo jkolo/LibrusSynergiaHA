@@ -21,6 +21,7 @@ from .const import (
     DEFAULT_BASE_MINUTES,
     DEFAULT_HUMANIZE,
     DEFAULT_JITTER,
+    DEFAULT_MESSAGE_NOTIFY,
     DEFAULT_OFF_SCHOOL_MULTIPLIER,
     DEFAULT_QUIET_END,
     DEFAULT_QUIET_HOURS_ENABLED,
@@ -30,6 +31,7 @@ from .const import (
     OPT_ENABLED_SUBJECTS,
     OPT_HUMANIZE,
     OPT_JITTER,
+    OPT_MESSAGE_NOTIFY,
     OPT_OFF_SCHOOL_MULTIPLIER,
     OPT_QUIET_END,
     OPT_QUIET_HOURS_ENABLED,
@@ -265,6 +267,10 @@ class LibrusOptionsFlow(OptionsFlow):
             vol.Optional(
                 OPT_HUMANIZE,
                 default=opts.get(OPT_HUMANIZE, DEFAULT_HUMANIZE),
+            ): bool,
+            vol.Optional(
+                OPT_MESSAGE_NOTIFY,
+                default=opts.get(OPT_MESSAGE_NOTIFY, DEFAULT_MESSAGE_NOTIFY),
             ): bool,
         }
         if known_subjects:

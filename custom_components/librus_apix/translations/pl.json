@@ -48,7 +48,8 @@
           "quiet_start": "Cisza nocna — początek (HH:MM)",
           "quiet_end": "Cisza nocna — koniec (HH:MM)",
           "off_school_multiplier": "Mnożnik w weekendy, święta i ferie",
-          "humanize": "Włącz tryb naturalnej synchronizacji (wyłącz = stały interwał, tryb legacy)"
+          "humanize": "Włącz tryb naturalnej synchronizacji (wyłącz = stały interwał, tryb legacy)",
+          "message_notify": "Pokazuj baner powiadomienia przy nowej wiadomości (persistent_notification)"
         }
       }
     }
