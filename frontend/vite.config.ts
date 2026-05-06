@@ -7,7 +7,7 @@ export default defineConfig({
       formats: ["es"],
       fileName: () => "librus-messages-card.js",
     },
-    outDir: "../dist",
+    outDir: "../custom_components/librus_apix/www",
     emptyOutDir: false,
     minify: "esbuild",
     rollupOptions: {

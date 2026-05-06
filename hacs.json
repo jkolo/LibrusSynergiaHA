@@ -3,6 +3,5 @@
   "hacs": "1.6.0",
   "homeassistant": "2024.2.0",
   "country": "PL",
-  "filename": "librus-messages-card.js",
   "render_readme": true
 }

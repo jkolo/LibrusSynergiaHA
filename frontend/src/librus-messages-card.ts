@@ -14,10 +14,6 @@ export class LibrusMessagesCard extends LitElement {
   @state() private _loading = false;
   @state() private _onlyUnread = false;
 
-  static getConfigElement() {
-    return document.createElement("librus-messages-card-editor");
-  }
-
   static getStubConfig() {
     return { entity: "", entry_id: "" };
   }
@@ -113,7 +109,7 @@ export class LibrusMessagesCard extends LitElement {
       overflow: hidden;
     }
     .message-item.unread {
-      background: var(--primary-color-light, #e8f4fd);
+      background: color-mix(in srgb, var(--primary-color) 12%, transparent);
     }
     .message-header {
       display: flex;
@@ -140,6 +136,12 @@ export class LibrusMessagesCard extends LitElement {
       text-overflow: ellipsis;
       white-space: nowrap;
     }
+    .attach-icon {
+      --mdi-icon-size: 14px;
+      vertical-align: middle;
+      color: var(--secondary-text-color);
+      margin-right: 2px;
+    }
     .message-date {
       font-size: 0.75rem;
       color: var(--disabled-text-color);
@@ -150,7 +152,7 @@ export class LibrusMessagesCard extends LitElement {
       gap: 4px;
       flex-shrink: 0;
     }
-    mwc-icon-button, ha-icon-button {
+    ha-icon-button {
       --mdc-icon-button-size: 32px;
     }
     .message-content {
@@ -176,6 +178,7 @@ export class LibrusMessagesCard extends LitElement {
     if (!this._config) return nothing;
     const messages = this._messages;
     const title = this._config.title ?? "Wiadomości Librus";
+    const filterActive = this._onlyUnread || this._config.only_unread;
 
     return html`
       <ha-card>
@@ -194,7 +197,7 @@ export class LibrusMessagesCard extends LitElement {
         </div>
         <div class="message-list">
           ${messages.length === 0
-            ? html`<div class="empty">Brak wiadomości</div>`
+            ? html`<div class="empty">${filterActive ? "Brak nieprzeczytanych wiadomości" : "Brak wiadomości"}</div>`
             : messages.map((msg) => this._renderMessage(msg))}
         </div>
       </ha-card>
@@ -208,7 +211,10 @@ export class LibrusMessagesCard extends LitElement {
         <div class="message-header">
           <div class="message-meta">
             <div class="message-sender">${msg.sender}</div>
-            <div class="message-title">${msg.title}</div>
+            <div class="message-title">
+              ${msg.has_attachment ? html`<ha-icon icon="mdi:paperclip" class="attach-icon"></ha-icon>` : nothing}
+              ${msg.title}
+            </div>
           </div>
           <span class="message-date">${msg.date}</span>
           <div class="message-actions">
@@ -243,6 +249,13 @@ export class LibrusMessagesCard extends LitElement {
     `;
   }
 }
+
+(window as Window & { customCards?: unknown[] }).customCards ??= [];
+(window as Window & { customCards?: unknown[] }).customCards!.push({
+  type: "librus-messages-card",
+  name: "Librus — Wiadomości",
+  description: "Wiadomości szkolne z podglądem treści i zarządzaniem powiadomieniami.",
+});
 
 declare global {
   interface HTMLElementTagNameMap {

@@ -14,6 +14,7 @@ from custom_components.librus_apix.sensor import (
     _attrs_latest_announcement,
     _attrs_latest_grade,
     _attrs_latest_message,
+    _attrs_messages,
     _attrs_next_exam,
     _attrs_upcoming_exams,
     _val_absences_count,
@@ -24,6 +25,7 @@ from custom_components.librus_apix.sensor import (
     _val_latest_grade,
     _val_latest_message,
     _val_next_exam,
+    _val_unread_count,
 )
 
 
@@ -88,6 +90,90 @@ class TestAttrsLatestGrade:
         assert attrs["description"] == "Świetna praca."
         assert attrs["title"] == "Funkcje kwadratowe"
         assert attrs["teacher"] == "Anna Nowak"
+
+
+# ---------------------------------------------------------------------------
+# _attrs_messages / _val_unread_count
+# ---------------------------------------------------------------------------
+
+def _make_msg(i: int, *, unread: bool = False, dismissed: bool = False, attachment: bool = False, recent: bool = False) -> dict:
+    return {
+        "author": f"Nadawca {i}",
+        "title": f"Temat {i}",
+        "date": f"2026-04-{i:02d}",
+        "href": f"href_{i}",
+        "unread": unread,
+        "notification_dismissed": dismissed,
+        "has_attachment": attachment,
+        "is_recent": recent,
+    }
+
+
+class TestAttrsMessages:
+    def test_empty_messages(self):
+        attrs = _attrs_messages({"messages": []})
+        assert attrs["messages"] == []
+        assert attrs["unread_count"] == 0
+        assert attrs["undismissed_count"] == 0
+        assert attrs["has_new_messages"] is False
+
+    def test_returns_up_to_ten_messages(self):
+        msgs = [_make_msg(i) for i in range(1, 12)]  # 11 wiadomości
+        attrs = _attrs_messages({"messages": msgs})
+        assert len(attrs["messages"]) == 10  # max 10, nie 5
+
+    def test_fewer_than_ten_returns_all(self):
+        msgs = [_make_msg(i) for i in range(1, 4)]  # 3 wiadomości
+        attrs = _attrs_messages({"messages": msgs})
+        assert len(attrs["messages"]) == 3
+
+    def test_message_fields_mapped_correctly(self):
+        msgs = [_make_msg(1, unread=True, attachment=True, recent=True, dismissed=False)]
+        attrs = _attrs_messages({"messages": msgs})
+        m = attrs["messages"][0]
+        assert m["sender"] == "Nadawca 1"
+        assert m["title"] == "Temat 1"
+        assert m["date"] == "2026-04-01"
+        assert m["href"] == "href_1"
+        assert m["unread"] is True
+        assert m["has_attachment"] is True
+        assert m["is_recent"] is True
+        assert m["notification_dismissed"] is False
+
+    def test_unread_count(self):
+        msgs = [_make_msg(i, unread=(i % 2 == 0)) for i in range(1, 7)]
+        attrs = _attrs_messages({"messages": msgs})
+        assert attrs["unread_count"] == 3  # i=2,4,6
+
+    def test_undismissed_count(self):
+        # unread=True, dismissed=False → liczy do undismissed
+        # unread=True, dismissed=True → nie liczy
+        msgs = [
+            _make_msg(1, unread=True, dismissed=False),
+            _make_msg(2, unread=True, dismissed=True),
+            _make_msg(3, unread=False, dismissed=False),
+        ]
+        attrs = _attrs_messages({"messages": msgs})
+        assert attrs["undismissed_count"] == 1
+
+    def test_has_new_messages_true_when_recent(self):
+        msgs = [_make_msg(1, recent=True), _make_msg(2)]
+        attrs = _attrs_messages({"messages": msgs})
+        assert attrs["has_new_messages"] is True
+
+    def test_has_new_messages_false_when_none_recent(self):
+        msgs = [_make_msg(1), _make_msg(2)]
+        attrs = _attrs_messages({"messages": msgs})
+        assert attrs["has_new_messages"] is False
+
+
+class TestValUnreadCount:
+    def test_empty(self):
+        assert _val_unread_count({"messages": []}) == 0
+
+    def test_counts_only_unread(self):
+        msgs = [_make_msg(i, unread=(i <= 3)) for i in range(1, 6)]
+        assert _val_unread_count({"messages": msgs}) == 3
 
 
 # ---------------------------------------------------------------------------

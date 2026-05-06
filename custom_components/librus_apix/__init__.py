@@ -9,9 +9,12 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date as _date, datetime as _dt, timedelta
+from pathlib import Path
 from typing import Any, TypeVar
 
 import voluptuous as vol
+from homeassistant.components.frontend import add_extra_js_url
+from homeassistant.components.http import StaticPathConfig
 from homeassistant.config_entries import ConfigEntry, ConfigEntryState
 from homeassistant.const import CONF_PASSWORD, CONF_USERNAME
 from homeassistant.core import HomeAssistant, ServiceCall, SupportsResponse
@@ -51,6 +54,20 @@ T = TypeVar("T")
 _LOGGER = logging.getLogger(__name__)
 
 PLATFORMS = ["sensor", "calendar", "event"]
+
+_CARD_URL = "/librus_apix/librus-messages-card.js"
+
+
+async def async_setup(hass: HomeAssistant, config: dict) -> bool:
+    """Zarejestruj kartę Lovelace jako statyczny zasób HA."""
+    card_path = Path(__file__).parent / "www" / "librus-messages-card.js"
+    if card_path.exists() and hass.http is not None:
+        await hass.http.async_register_static_paths([
+            StaticPathConfig(_CARD_URL, str(card_path), cache_headers=False),
+        ])
+        add_extra_js_url(hass, _CARD_URL)
+        _LOGGER.debug("Librus messages card registered at %s", _CARD_URL)
+    return True
 
 
 @dataclass

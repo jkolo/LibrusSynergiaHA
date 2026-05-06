@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, patch
+from pathlib import Path
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.core import HomeAssistant
@@ -10,6 +11,47 @@ from homeassistant.util import dt as dt_util
 from librus_apix.student_information import StudentInformation
 
 from custom_components.librus_apix._data_store import LibrusDataStore
+
+
+async def test_domain_setup_registers_frontend_card(hass: HomeAssistant) -> None:
+    """async_setup domenowy rejestruje plik JS karty i wywołuje add_extra_js_url."""
+    import custom_components.librus_apix as librus_module
+
+    mock_http = MagicMock()
+    mock_http.async_register_static_paths = AsyncMock()
+
+    with (
+        patch.object(Path, "exists", return_value=True),
+        patch("custom_components.librus_apix.add_extra_js_url") as mock_add_js,
+        patch.object(hass, "http", mock_http, create=True),
+    ):
+        result = await librus_module.async_setup(hass, {})
+
+    assert result is True
+    mock_http.async_register_static_paths.assert_called_once()
+    call_args = mock_http.async_register_static_paths.call_args[0][0]
+    assert len(call_args) == 1
+    assert call_args[0].url_path == "/librus_apix/librus-messages-card.js"
+    mock_add_js.assert_called_once_with(hass, "/librus_apix/librus-messages-card.js")
+
+
+async def test_domain_setup_skips_registration_when_file_missing(hass: HomeAssistant) -> None:
+    """Gdy plik JS nie istnieje, rejestracja jest pomijana (graceful)."""
+    import custom_components.librus_apix as librus_module
+
+    mock_http = MagicMock()
+    mock_http.async_register_static_paths = AsyncMock()
+
+    with (
+        patch.object(Path, "exists", return_value=False),
+        patch("custom_components.librus_apix.add_extra_js_url") as mock_add_js,
+        patch.object(hass, "http", mock_http, create=True),
+    ):
+        result = await librus_module.async_setup(hass, {})
+
+    assert result is True
+    mock_http.async_register_static_paths.assert_not_called()
+    mock_add_js.assert_not_called()
 
 
 async def test_setup_and_unload(hass: HomeAssistant, mock_config_entry, mock_librus_client):

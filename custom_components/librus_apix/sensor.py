@@ -145,7 +145,7 @@ def _attrs_messages(data: dict[str, Any]) -> dict[str, Any]:
                 "has_attachment": m.get("has_attachment", False),
                 "href": m.get("href", ""),
             }
-            for m in all_msgs[:5]
+            for m in all_msgs[:10]
         ],
         "unread_count": sum(1 for m in all_msgs if m.get("unread", False)),
         "undismissed_count": sum(
