@@ -12,8 +12,9 @@ from datetime import date as _date, datetime as _dt, timedelta
 from pathlib import Path
 from typing import Any, TypeVar
 
+import uuid
+
 import voluptuous as vol
-from homeassistant.components.frontend import add_extra_js_url
 from homeassistant.components.http import StaticPathConfig
 from homeassistant.config_entries import ConfigEntry, ConfigEntryState
 from homeassistant.const import CONF_PASSWORD, CONF_USERNAME
@@ -65,9 +66,39 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
         await hass.http.async_register_static_paths([
             StaticPathConfig(_CARD_URL, str(card_path), cache_headers=False),
         ])
-        add_extra_js_url(hass, _CARD_URL)
-        _LOGGER.debug("Librus messages card registered at %s", _CARD_URL)
+        hass.async_create_task(_async_ensure_lovelace_resource(hass, _CARD_URL))
+        _LOGGER.debug("Librus messages card static path registered at %s", _CARD_URL)
     return True
+
+
+async def _async_ensure_lovelace_resource(hass: HomeAssistant, url: str) -> None:
+    """Dodaj url do kolekcji Lovelace resources jeśli jeszcze go tam nie ma."""
+    from homeassistant.helpers.storage import Store
+
+    store = Store(hass, 1, "lovelace_resources", minor_version=1)
+    data = await store.async_load() or {"items": []}
+
+    if any(item.get("url") == url for item in data.get("items", [])):
+        return
+
+    data.setdefault("items", []).append({
+        "id": uuid.uuid4().hex,
+        "url": url,
+        "type": "module",
+    })
+    await store.async_save(data)
+    _LOGGER.info("Registered Lovelace resource: %s (effective after browser reload)", url)
+
+    # Powiadom na żywo aktywną kolekcję zasobów (działa gdy lovelace już skonfigurowane)
+    lovelace_resources = hass.data.get("lovelace", {}).get("resources")
+    if lovelace_resources is not None:
+        try:
+            existing = {item.get("url") for item in lovelace_resources.async_items()}
+            if url not in existing:
+                await lovelace_resources.async_create_item({"res_type": "module", "url": url})
+                _LOGGER.debug("Lovelace resource registered live: %s", url)
+        except Exception as exc:  # noqa: BLE001
+            _LOGGER.debug("Could not register Lovelace resource live: %s", exc)
 
 
 @dataclass
