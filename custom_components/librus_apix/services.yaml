@@ -48,3 +48,29 @@ clear_read_messages:
       selector:
         config_entry:
           integration: librus_apix
+
+fetch_message_content:
+  name: Pobierz treść wiadomości
+  description: >
+    Pobiera pełną treść wiadomości z Librusa i zwraca w response_variable
+    (content, author, title, date).
+
+    UWAGA PRIVACY: pobranie treści SERVER-SIDE oznacza wiadomość jako
+    przeczytaną w Librusie. W przeglądarce dziennika ikona "nowa" zniknie.
+    Drugi rodzic na osobnym koncie nie jest dotknięty. Service automatycznie
+    oznacza wiadomość jako przeczytaną lokalnie (is_read_in_ha=True).
+  fields:
+    entry:
+      name: Konto Librus
+      required: true
+      selector:
+        config_entry:
+          integration: librus_apix
+    message_href:
+      name: Identyfikator wiadomości (href)
+      description: >
+        Numeryczny ID wiadomości — widoczny w atrybucie `href` sensora wiadomości.
+      required: true
+      example: "12345"
+      selector:
+        text:

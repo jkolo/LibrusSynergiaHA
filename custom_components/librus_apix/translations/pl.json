@@ -143,6 +143,9 @@
     },
     "message_not_found": {
       "message": "Wiadomość o identyfikatorze '{href}' nie istnieje w bieżących danych."
+    },
+    "message_fetch_failed": {
+      "message": "Nie udało się pobrać treści wiadomości '{href}'. Librus mógł zmienić strukturę HTML."
     }
   },
   "issues": {

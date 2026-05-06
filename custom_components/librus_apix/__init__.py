@@ -14,7 +14,7 @@ from typing import Any, TypeVar
 import voluptuous as vol
 from homeassistant.config_entries import ConfigEntry, ConfigEntryState
 from homeassistant.const import CONF_PASSWORD, CONF_USERNAME
-from homeassistant.core import HomeAssistant, ServiceCall
+from homeassistant.core import HomeAssistant, ServiceCall, SupportsResponse
 from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers import config_validation as cv
 from librus_apix import urls as librus_urls
@@ -34,6 +34,7 @@ from .const import (
     DOMAIN,
     OPT_HUMANIZE,
     SERVICE_CLEAR_READ_MESSAGES,
+    SERVICE_FETCH_MESSAGE_CONTENT,
     SERVICE_MARK_MESSAGE_READ,
     SERVICE_MARK_MESSAGE_UNREAD,
 )
@@ -571,6 +572,58 @@ class LibrusApiClient:
         return await self._with_retry("announcements", _work)
 
 
+    async def async_get_message_content(self, href: str) -> dict[str, str] | None:
+        """Pobierz pełną treść wiadomości (inner HTML) po numerycznym ID href.
+
+        UWAGA: GET na URL wiadomości SERVER-SIDE oznacza ją jako przeczytaną
+        w Librusie. Drugi rodzic na osobnym koncie Librus nie jest dotknięty.
+        Implementacja własna (nie przez message_content() z librus-apix) —
+        biblioteka zwraca .text (plain text); potrzebujemy decode_contents() (HTML).
+        """
+        def _work(client: Client) -> dict[str, str]:
+            from bs4 import BeautifulSoup
+            from librus_apix.exceptions import ParseError
+            from librus_apix.helpers import no_access_check
+            from librus_apix.messages import unwrap_message_data
+            import librus_apix.urls as _urls
+
+            # Krok 1: Odwiedź listę wiadomości — symuluje nawigację użytkownika,
+            # prymuje stan sesji Librusa przed fetchem konkretnej wiadomości.
+            client.post(_urls.MESSAGE_URL, data={
+                "numer_strony105": 0,
+                "porcjowanie_pojemnik105": "105",
+            })
+
+            # Krok 2: Pobierz konkretną wiadomość (side-effect: SS mark-as-read).
+            soup = no_access_check(
+                BeautifulSoup(
+                    client.get(_urls.MESSAGE_URL + "/" + href).text, "lxml"
+                )
+            )
+            message_data = soup.select_one("table[class='stretch']")
+            if message_data is None:
+                raise ParseError("Error in parsing message data.")
+            trs = message_data.select("tr")
+            if len(trs) < 3:
+                raise ParseError("Not enough rows in message_data")
+            author_row, title_row, date_row = trs[:3]
+            content = soup.find("div", attrs={"class": "container-message-content"})
+            if content is None:
+                raise ParseError("Error in parsing message content.")
+            return {
+                "author": unwrap_message_data(author_row),
+                "title": unwrap_message_data(title_row),
+                "date": unwrap_message_data(date_row),
+                "content": content.decode_contents(),
+            }
+
+        try:
+            return await self._with_retry("message_content", _work)
+        except Exception as exc:
+            _LOGGER.warning("Could not fetch message content for %s: %s", href, exc)
+            return None
+
+
 async def _async_options_updated(hass: HomeAssistant, entry: LibrusConfigEntry) -> None:
     """Reload the entry whenever the user changes options."""
     await hass.config_entries.async_reload(entry.entry_id)
@@ -654,6 +707,26 @@ def _setup_services(hass: HomeAssistant) -> None:
             m["is_read_in_ha"] = False
         coordinator.async_set_updated_data(coordinator.data)
 
+    async def _fetch_content(call: ServiceCall) -> dict:
+        entry_id: str = call.data["entry"]
+        href: str = call.data["message_href"]
+        coordinator = _resolve_coordinator(entry_id)
+        _validate_href(coordinator, href)
+        content = await coordinator.client.async_get_message_content(href)
+        if content is None:
+            raise ServiceValidationError(
+                translation_domain=DOMAIN,
+                translation_key="message_fetch_failed",
+                translation_placeholders={"href": href},
+            )
+        await coordinator.read_messages_store.async_mark_read(href)
+        for m in (coordinator.data or {}).get("messages", []):
+            if m.get("href") == href:
+                m["is_read_in_ha"] = True
+                break
+        coordinator.async_set_updated_data(coordinator.data)
+        return content
+
     hass.services.async_register(
         DOMAIN, SERVICE_MARK_MESSAGE_READ, _mark_read, schema=_schema_with_href,
     )
@@ -662,6 +735,11 @@ def _setup_services(hass: HomeAssistant) -> None:
     )
     hass.services.async_register(
         DOMAIN, SERVICE_CLEAR_READ_MESSAGES, _clear_read, schema=_schema_entry_only,
+    )
+    hass.services.async_register(
+        DOMAIN, SERVICE_FETCH_MESSAGE_CONTENT, _fetch_content,
+        schema=_schema_with_href,
+        supports_response=SupportsResponse.ONLY,
     )
 
 
