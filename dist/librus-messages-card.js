@@ -729,7 +729,7 @@ let f = class extends O {
     if (!(!this.hass || !this._config)) {
       this._expandedHref = r.href, this._content = null, this._loading = !0;
       try {
-        const t = await this.hass.callService(
+        const e = await this.hass.callService(
           "librus_apix",
           "fetch_message_content",
           { entry: this._config.entry_id, message_href: r.href },
@@ -737,7 +737,7 @@ let f = class extends O {
           !0,
           !0
         );
-        this._content = t;
+        this._content = e.response ?? e;
       } catch {
         this._content = { content: "<em>Błąd pobierania treści.</em>" };
       } finally {

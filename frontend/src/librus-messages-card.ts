@@ -57,7 +57,8 @@ export class LibrusMessagesCard extends LitElement {
         true,
         true,
       );
-      this._content = result as Record<string, string>;
+      const r = result as { response?: Record<string, string> } | Record<string, string>;
+      this._content = (r as { response?: Record<string, string> }).response ?? r as Record<string, string>;
     } catch {
       this._content = { content: "<em>Błąd pobierania treści.</em>" };
     } finally {
