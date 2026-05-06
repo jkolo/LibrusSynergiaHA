@@ -1016,7 +1016,7 @@ u.styles = _e`
       font-size: 0.9rem;
     }
 
-    /* Dialog */
+    /* Dialog — display controlled by browser via [open] attribute */
     dialog {
       max-width: min(700px, 95vw);
       max-height: 85vh;
@@ -1027,6 +1027,8 @@ u.styles = _e`
       color: var(--primary-text-color);
       padding: 0;
       overflow: hidden;
+    }
+    dialog[open] {
       display: flex;
       flex-direction: column;
     }
