@@ -29,7 +29,7 @@ from librus_apix.attendance import get_attendance, get_attendance_frequency
 from librus_apix.client import Client, new_client
 from librus_apix.exceptions import TokenError
 from librus_apix.grades import get_grades
-from librus_apix.messages import get_received
+from librus_apix.messages import get_max_page_number, get_received
 from librus_apix.schedule import get_schedule
 from librus_apix.student_information import get_student_information
 from librus_apix.timetable import get_timetable
@@ -343,33 +343,39 @@ class LibrusApiClient:
 
         return await self._with_retry("grades", _work)
 
-    async def async_get_messages(self, count: int = 50) -> list[dict[str, Any]] | None:
-        """Get latest messages from Librus (multi-page if needed).
+    async def async_get_messages(
+        self, known_hrefs: frozenset[str] | None = None
+    ) -> list[dict[str, Any]] | None:
+        """Get new inbox messages from Librus (delta fetch).
 
         Only headers are returned — body NOT fetched to avoid marking as read.
-        Fetches successive pages of Librus inbox until `count` messages collected
-        or the API returns an empty page.
+        Iterates pages 0..max_page; stops at the first page containing a message
+        whose href is already in known_hrefs (previous sync). Returns only the
+        messages that are newer than any known href.
         """
         def _work(client: Client) -> list[dict[str, Any]]:
-            all_messages: list[dict[str, Any]] = []
-            page = 0
-            while len(all_messages) < count:
+            max_page = get_max_page_number(client)
+            new_messages: list[dict[str, Any]] = []
+            for page in range(max_page + 1):
                 page_msgs = get_received(client, page)
                 if not page_msgs:
                     break
-                all_messages.extend(
-                    {
-                        "author": msg.author,
-                        "title": msg.title,
-                        "date": msg.date,
-                        "href": msg.href,
-                        "unread": msg.unread,
-                        "has_attachment": msg.has_attachment,
-                    }
-                    for msg in page_msgs
-                )
-                page += 1
-            return all_messages[:count]
+                found_known = False
+                for msg in page_msgs:
+                    if known_hrefs and msg.href in known_hrefs:
+                        found_known = True
+                    else:
+                        new_messages.append({
+                            "author": msg.author,
+                            "title": msg.title,
+                            "date": msg.date,
+                            "href": msg.href,
+                            "unread": msg.unread,
+                            "has_attachment": msg.has_attachment,
+                        })
+                if found_known:
+                    break
+            return new_messages
 
         return await self._with_retry("messages", _work)
 
@@ -837,7 +843,7 @@ def _setup_services(hass: HomeAssistant) -> None:
         schema=vol.Schema({
             vol.Required("entry"): cv.string,
             vol.Optional("offset", default=0): vol.All(int, vol.Range(min=0)),
-            vol.Optional("count", default=10): vol.All(int, vol.Range(min=1, max=50)),
+            vol.Optional("count", default=10): vol.All(int, vol.Range(min=1, max=100)),
         }),
         supports_response=SupportsResponse.ONLY,
     )

@@ -443,7 +443,13 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             fetchers: dict[str, Callable[[], Awaitable[Any]]] = {
                 "student_info": self.client.async_get_student_information,
                 "grades": self.client.async_get_grades,
-                "messages": lambda: self.client.async_get_messages(count=50),
+                "messages": lambda: self.client.async_get_messages(
+                    known_hrefs=frozenset(
+                        m.get("href")
+                        for m in (self.data or {}).get("messages", [])
+                        if m.get("href")
+                    )
+                ),
                 # Fetch the full schedule once: sensor.zapowiedzi uses only
                 # exam events, calendar.terminarz uses everything.
                 "schedule": lambda: self.client.async_get_schedule_events(
@@ -523,10 +529,12 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     "student_info": student_info or prev.get("student_info"),
                     "grades": prev.get("grades", []),
                     "grades_by_subject": prev.get("grades_by_subject", {}),
-                    "messages": (
-                        self._annotate_messages(messages)
-                        if messages is not None
-                        else prev.get("messages", [])
+                    "messages": self._annotate_messages(
+                        (messages or [])
+                        + [
+                            m for m in prev.get("messages", [])
+                            if m.get("href") not in {x.get("href") for x in (messages or [])}
+                        ]
                     ),
                     "upcoming_exams": (
                         upcoming_exams
@@ -590,7 +598,15 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     "is_recent": _is_recent(grade["date"]),
                 })
 
-            annotated_messages = self._annotate_messages(messages)
+            # Delta fetch: messages contains only NEW entries. Merge with
+            # previously cached ones (deduplicated by href) so the full inbox
+            # history is preserved across syncs.
+            new_msgs = messages if messages is not None else []
+            new_hrefs = {m.get("href") for m in new_msgs}
+            prev_messages = (self.data or {}).get("messages", [])
+            old_msgs = [m for m in prev_messages if m.get("href") not in new_hrefs]
+            merged_messages = new_msgs + old_msgs
+            annotated_messages = self._annotate_messages(merged_messages)
             exams_list = upcoming_exams if upcoming_exams is not None else []
 
             attendance_list = attendance if attendance is not None else []
