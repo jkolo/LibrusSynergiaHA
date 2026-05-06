@@ -97,6 +97,9 @@
       },
       "latest_announcement": {
         "name": "Latest announcement"
+      },
+      "last_refresh": {
+        "name": "Last refresh"
       }
     },
     "calendar": {

@@ -95,6 +95,9 @@
       "announcements": {
         "name": "Ogłoszenia"
       },
+      "last_refresh": {
+        "name": "Ostatnie odświeżenie"
+      },
       "latest_announcement": {
         "name": "Ostatnie ogłoszenie"
       }

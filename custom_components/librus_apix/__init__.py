@@ -17,6 +17,8 @@ from homeassistant.const import CONF_PASSWORD, CONF_USERNAME
 from homeassistant.core import HomeAssistant, ServiceCall, SupportsResponse
 from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers import config_validation as cv
+from homeassistant.helpers.event import async_call_later
+from homeassistant.util import dt as dt_util
 from librus_apix import urls as librus_urls
 from librus_apix.announcements import get_announcements
 from librus_apix.attendance import get_attendance, get_attendance_frequency
@@ -28,10 +30,13 @@ from librus_apix.schedule import get_schedule
 from librus_apix.student_information import get_student_information
 from librus_apix.timetable import get_timetable
 
+from ._data_store import LibrusDataStore
 from ._message_store import ReadMessagesStore
 from .const import (
+    DEFAULT_BASE_MINUTES,
     DEFAULT_HUMANIZE,
     DOMAIN,
+    OPT_BASE_MINUTES,
     OPT_HUMANIZE,
     SERVICE_CLEAR_DISMISSED_NOTIFICATIONS,
     SERVICE_DISMISS_MESSAGE_NOTIFICATION,
@@ -773,12 +778,35 @@ async def async_setup_entry(hass: HomeAssistant, entry: LibrusConfigEntry) -> bo
     await read_store.async_load()
     coordinator.read_messages_store = read_store
 
-    await coordinator.async_config_entry_first_refresh()
+    data_store = LibrusDataStore(hass, entry.entry_id)
+    coordinator.data_store = data_store
+    cached = await data_store.async_load()
 
-    # Custom scheduler kicks off here so coordinator.data["schedule"] is
-    # already populated from the first refresh — schedule_next_refresh
-    # reads is_school_day(today, schedule) to slow down on holidays.
-    coordinator.schedule_next_refresh()
+    if cached is not None:
+        coordinator.data, saved_at = cached
+        coordinator._seed_seen_sets_from_data(coordinator.data)
+        coordinator._first_run = False
+        _LOGGER.debug(
+            "Loaded coordinator data from cache (saved %s), skipping first_refresh",
+            saved_at.isoformat(),
+        )
+        # Jeśli cache jest starszy niż jeden interwał — odśwież szybko po 60s,
+        # by nie pokazywać nieaktualnych danych dłużej niż jeden cykl.
+        base_min = entry.options.get(OPT_BASE_MINUTES, DEFAULT_BASE_MINUTES)
+        cache_age = dt_util.utcnow() - saved_at
+        if cache_age.total_seconds() > base_min * 60:
+            _LOGGER.debug("Cache stale (age=%s), scheduling fast refresh in 60s", cache_age)
+            coordinator._unsub_next = async_call_later(
+                hass, 60, coordinator._scheduled_refresh
+            )
+        else:
+            coordinator.schedule_next_refresh()
+    else:
+        await coordinator.async_config_entry_first_refresh()
+        # Custom scheduler kicks off here so coordinator.data["schedule"] is
+        # already populated from the first refresh — schedule_next_refresh
+        # reads is_school_day(today, schedule) to slow down on holidays.
+        coordinator.schedule_next_refresh()
 
     entry.runtime_data = LibrusRuntimeData(client=client, coordinator=coordinator)
 

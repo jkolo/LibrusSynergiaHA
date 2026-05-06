@@ -37,15 +37,17 @@ def no_human_pauses():
 
 @pytest.fixture
 def mock_student_info():
-    """Return a fake student_information object."""
-    info = MagicMock()
-    info.name = "Jan Kowalski"
-    info.class_name = "5A"
-    info.number = "12"
-    info.tutor = "Anna Nowak"
-    info.school = "SP 1"
-    info.lucky_number = 7
-    return info
+    """Return a fake student_information object (real StudentInformation dataclass)."""
+    from librus_apix.student_information import StudentInformation
+
+    return StudentInformation(
+        name="Jan Kowalski",
+        class_name="5A",
+        number=12,
+        tutor="Anna Nowak",
+        school="SP 1",
+        lucky_number=7,
+    )
 
 
 @pytest.fixture

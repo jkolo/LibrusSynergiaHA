@@ -51,6 +51,7 @@ from .humanize import (
 
 if TYPE_CHECKING:
     from . import LibrusApiClient
+    from ._data_store import LibrusDataStore
     from ._message_store import ReadMessagesStore
 
 _LOGGER = logging.getLogger(__name__)
@@ -222,7 +223,13 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 a stable but distinct order pattern.
         """
         self.client = client
+        self.data_store: LibrusDataStore | None = None
         self.read_messages_store: ReadMessagesStore | None = None
+        self._step_timestamps: dict[str, datetime | None] = {k: None for k in (
+            "student_info", "grades", "messages", "schedule",
+            "timetable", "attendance", "announcements",
+        )}
+        self._last_full_refresh: datetime | None = None
         self._seen_message_hrefs: OrderedDict[str, None] = OrderedDict()
         self._seen_grade_ids: OrderedDict[tuple, None] = OrderedDict()
         self._seen_exam_ids: OrderedDict[tuple, None] = OrderedDict()
@@ -283,6 +290,42 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     def _clear_issue(self, kind: str) -> None:
         ir.async_delete_issue(self.hass, DOMAIN, self._issue_id(kind))
+
+    def _seed_seen_sets_from_data(self, data: dict[str, Any]) -> None:
+        """Seed seen-sets from coordinator data bez emitowania bus events.
+
+        Wywoływana przy _first_run (przed bus events) i przy cache-first startup
+        z __init__.py, by kolejny refresh poprawnie wykrył tylko nowe elementy.
+        """
+        for msg in data.get("messages", []) or []:
+            href = msg.get("href", "")
+            _add_lru(self._seen_message_hrefs, href)
+        for grade in data.get("grades", []) or []:
+            _add_lru(
+                self._seen_grade_ids,
+                (grade["subject"], grade["date"], grade["grade"]),
+            )
+        for exam in data.get("upcoming_exams", []) or []:
+            _add_lru(
+                self._seen_exam_ids,
+                (exam["date"], exam["subject"], exam["title"]),
+            )
+        for ann in data.get("announcements", []) or []:
+            _add_lru(
+                self._seen_announcement_keys,
+                (ann.get("date", ""), ann.get("title", "")),
+            )
+        for att in data.get("attendance", []) or []:
+            if att.get("is_absence") or att.get("is_late"):
+                _add_lru(
+                    self._seen_absence_keys,
+                    (
+                        att.get("date", ""),
+                        att.get("subject", ""),
+                        att.get("period"),
+                        att.get("symbol", ""),
+                    ),
+                )
 
     # ---------- Options helpers (PR 6) ----------
 
@@ -424,6 +467,8 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             results: dict[str, Any] = {}
             for i, name in enumerate(order):
                 results[name] = await fetchers[name]()
+                if results[name] is not None:
+                    self._step_timestamps[name] = dt_util.utcnow()
                 # Skip jitter on first_run: HA cancels setup after ~60s,
                 # and 7 fetchers × up to 15s pause would exceed that limit.
                 if humanize and i < len(order) - 1 and not self._first_run:
@@ -573,10 +618,9 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # genuinely new messages). Do NOT enqueue to _pending_events.
             if self._first_run:
                 self._first_run = False
+                self._seed_seen_sets_from_data(result)
                 for msg in annotated_messages:
-                    href = msg.get("href", "")
-                    _add_lru(self._seen_message_hrefs, href)
-                    if href:
+                    if href := msg.get("href", ""):
                         self.hass.bus.async_fire(EVENT_NOWA_WIADOMOSC, {
                             "sender": msg.get("author", ""),
                             "title": msg.get("title", ""),
@@ -585,32 +629,6 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                             "has_attachment": msg.get("has_attachment", False),
                             "initial": True,
                         })
-                for grade in grades:
-                    _add_lru(
-                        self._seen_grade_ids,
-                        (grade["subject"], grade["date"], grade["grade"]),
-                    )
-                for exam in exams_list:
-                    _add_lru(
-                        self._seen_exam_ids,
-                        (exam["date"], exam["subject"], exam["title"]),
-                    )
-                for ann in announcements_list:
-                    _add_lru(
-                        self._seen_announcement_keys,
-                        (ann.get("date", ""), ann.get("title", "")),
-                    )
-                for att in attendance_list:
-                    if att.get("is_absence") or att.get("is_late"):
-                        _add_lru(
-                            self._seen_absence_keys,
-                            (
-                                att.get("date", ""),
-                                att.get("subject", ""),
-                                att.get("period"),
-                                att.get("symbol", ""),
-                            ),
-                        )
             else:
                 self._enqueue_events(
                     annotated_messages, grades, exams_list,
@@ -625,6 +643,11 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
             # Successful refresh: clear the auth repair issue if present.
             self._clear_issue(ISSUE_AUTH_FAILED)
+            self._last_full_refresh = dt_util.utcnow()
+            if self.data_store is not None:
+                self.hass.async_create_task(
+                    self.data_store.async_save(result, self._last_full_refresh)
+                )
             return result
 
         except LibrusAuthError as err:

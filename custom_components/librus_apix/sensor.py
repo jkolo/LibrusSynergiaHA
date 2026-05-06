@@ -9,6 +9,7 @@ from datetime import date, datetime
 from typing import Any
 
 from homeassistant.components.sensor import (
+    SensorDeviceClass,
     SensorEntity,
     SensorEntityDescription,
     SensorStateClass,
@@ -687,6 +688,42 @@ class LibrusSubjectAverageSensor(LibrusBaseEntity, SensorEntity):
 
 
 # ---------------------------------------------------------------------------
+# Diagnostic: last refresh timestamps
+# ---------------------------------------------------------------------------
+
+
+class LibrusRefreshDiagSensor(LibrusBaseEntity, SensorEntity):
+    """Sensor diagnostyczny z timestampem ostatniego odświeżenia per krok."""
+
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_device_class = SensorDeviceClass.TIMESTAMP
+    _attr_icon = "mdi:clock-sync"
+    _attr_translation_key = "last_refresh"
+
+    def __init__(
+        self,
+        coordinator: LibrusDataUpdateCoordinator,
+        config_entry: ConfigEntry,
+    ) -> None:
+        super().__init__(coordinator, config_entry)
+
+    @property
+    def unique_id(self) -> str:
+        return f"{self._config_entry.entry_id}_odswiezenie"
+
+    @property
+    def native_value(self) -> datetime | None:
+        return self.coordinator._last_full_refresh
+
+    @property
+    def extra_state_attributes(self) -> dict[str, str | None]:
+        return {
+            step: ts.isoformat() if ts else None
+            for step, ts in self.coordinator._step_timestamps.items()
+        }
+
+
+# ---------------------------------------------------------------------------
 # Setup
 # ---------------------------------------------------------------------------
 
@@ -703,6 +740,7 @@ async def async_setup_entry(
         LibrusSensor(coordinator, config_entry, description)
         for description in SENSORS
     ]
+    static_entities.append(LibrusRefreshDiagSensor(coordinator, config_entry))
     async_add_entities(static_entities)
 
     # Per-subject sensors — track newly appearing subjects. The first refresh
