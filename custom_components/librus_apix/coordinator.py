@@ -424,7 +424,9 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             results: dict[str, Any] = {}
             for i, name in enumerate(order):
                 results[name] = await fetchers[name]()
-                if humanize and i < len(order) - 1:
+                # Skip jitter on first_run: HA cancels setup after ~60s,
+                # and 7 fetchers × up to 15s pause would exceed that limit.
+                if humanize and i < len(order) - 1 and not self._first_run:
                     pause = jitter_pause_seconds(self._rng)
                     _LOGGER.debug(
                         "Pause %.2fs before next fetch after %s", pause, name

@@ -289,7 +289,11 @@ async def test_random_order_uses_injected_rng(
 
 
 async def test_pause_invoked_between_endpoints(hass: HomeAssistant, fake_client):
-    """Po kazdym z pierwszych N-1 endpointow leci asyncio.sleep z jitter pause."""
+    """Po kazdym z pierwszych N-1 endpointow leci asyncio.sleep z jitter pause.
+
+    Pauzy są pomijane podczas _first_run (inicjalny setup, by nie przekroczyć
+    60-sekundowego limitu HA). Dopiero od drugiego refreshu jitter jest aktywny.
+    """
     import random as _random
     from unittest.mock import patch
 
@@ -297,7 +301,7 @@ async def test_pause_invoked_between_endpoints(hass: HomeAssistant, fake_client)
         hass, fake_client, rng=_random.Random(42)
     )
 
-    # Count only the calls our coordinator makes (deterministic 0.0 from
+    # Count only the calls our coordinator makes (deterministic 0.0001 from
     # the jitter_pause_seconds patch in the autouse fixture). Other library
     # code may also call asyncio.sleep, so we filter by argument.
     pause_seconds: list[float] = []
@@ -313,6 +317,12 @@ async def test_pause_invoked_between_endpoints(hass: HomeAssistant, fake_client)
     with patch(
         "custom_components.librus_apix.coordinator.asyncio.sleep", spy_sleep
     ):
+        # First refresh: _first_run=True → jitter pomijany (HA 60s setup limit)
+        await coordinator.async_refresh()
+        await hass.async_block_till_done()
+        assert len(pause_seconds) == 0, "first_run nie powinien miec pauz"
+
+        # Second refresh: _first_run=False → jitter aktywny
         await coordinator.async_refresh()
         await hass.async_block_till_done()
 
