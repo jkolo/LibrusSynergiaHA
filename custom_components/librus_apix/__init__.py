@@ -364,15 +364,15 @@ class LibrusApiClient:
                 for msg in page_msgs:
                     if known_hrefs and msg.href in known_hrefs:
                         found_known = True
-                    else:
-                        new_messages.append({
-                            "author": msg.author,
-                            "title": msg.title,
-                            "date": msg.date,
-                            "href": msg.href,
-                            "unread": msg.unread,
-                            "has_attachment": msg.has_attachment,
-                        })
+                        break  # wiadomości po granicy są starsze — już w cache
+                    new_messages.append({
+                        "author": msg.author,
+                        "title": msg.title,
+                        "date": msg.date,
+                        "href": msg.href,
+                        "unread": msg.unread,
+                        "has_attachment": msg.has_attachment,
+                    })
                 if found_known:
                     break
             return new_messages
