@@ -443,7 +443,7 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             fetchers: dict[str, Callable[[], Awaitable[Any]]] = {
                 "student_info": self.client.async_get_student_information,
                 "grades": self.client.async_get_grades,
-                "messages": lambda: self.client.async_get_messages(count=10),
+                "messages": lambda: self.client.async_get_messages(count=50),
                 # Fetch the full schedule once: sensor.zapowiedzi uses only
                 # exam events, calendar.terminarz uses everything.
                 "schedule": lambda: self.client.async_get_schedule_events(

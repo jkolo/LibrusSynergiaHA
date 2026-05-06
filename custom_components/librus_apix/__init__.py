@@ -45,6 +45,7 @@ from .const import (
     SERVICE_CLEAR_DISMISSED_NOTIFICATIONS,
     SERVICE_DISMISS_MESSAGE_NOTIFICATION,
     SERVICE_FETCH_MESSAGE_CONTENT,
+    SERVICE_LIST_MESSAGES,
     SERVICE_RESTORE_MESSAGE_NOTIFICATION,
 )
 from .coordinator import LibrusDataUpdateCoordinator
@@ -342,26 +343,33 @@ class LibrusApiClient:
 
         return await self._with_retry("grades", _work)
 
-    async def async_get_messages(self, count: int = 10) -> list[dict[str, Any]] | None:
-        """Get latest messages from Librus.
+    async def async_get_messages(self, count: int = 50) -> list[dict[str, Any]] | None:
+        """Get latest messages from Librus (multi-page if needed).
 
-        Only subject and sender are returned — message body is NOT fetched
-        to avoid marking messages as read in Librus.
+        Only headers are returned — body NOT fetched to avoid marking as read.
+        Fetches successive pages of Librus inbox until `count` messages collected
+        or the API returns an empty page.
         """
         def _work(client: Client) -> list[dict[str, Any]]:
-            messages = get_received(client, 0)
-            messages = messages[:count] if messages else []
-            return [
-                {
-                    "author": msg.author,
-                    "title": msg.title,
-                    "date": msg.date,
-                    "href": msg.href,
-                    "unread": msg.unread,
-                    "has_attachment": msg.has_attachment,
-                }
-                for msg in messages
-            ]
+            all_messages: list[dict[str, Any]] = []
+            page = 0
+            while len(all_messages) < count:
+                page_msgs = get_received(client, page)
+                if not page_msgs:
+                    break
+                all_messages.extend(
+                    {
+                        "author": msg.author,
+                        "title": msg.title,
+                        "date": msg.date,
+                        "href": msg.href,
+                        "unread": msg.unread,
+                        "has_attachment": msg.has_attachment,
+                    }
+                    for msg in page_msgs
+                )
+                page += 1
+            return all_messages[:count]
 
         return await self._with_retry("messages", _work)
 
@@ -795,6 +803,42 @@ def _setup_services(hass: HomeAssistant) -> None:
     hass.services.async_register(
         DOMAIN, SERVICE_FETCH_MESSAGE_CONTENT, _fetch_content,
         schema=_schema_with_href,
+        supports_response=SupportsResponse.ONLY,
+    )
+
+    async def _list_messages(call: ServiceCall) -> dict:
+        entry_id: str = call.data["entry"]
+        offset: int = call.data["offset"]
+        count: int = call.data["count"]
+        coordinator = _resolve_coordinator(entry_id)
+        # Read from coordinator cache — NO Librus API call.
+        # coordinator.data["messages"] is already annotated by _annotate_messages.
+        all_messages: list = (coordinator.data or {}).get("messages", [])
+        page = all_messages[offset : offset + count]
+        return {
+            "messages": [
+                {
+                    "sender": m["author"],
+                    "title": m["title"],
+                    "date": m["date"],
+                    "unread": m.get("unread", False),
+                    "is_recent": m.get("is_recent", False),
+                    "notification_dismissed": m.get("notification_dismissed", False),
+                    "has_attachment": m.get("has_attachment", False),
+                    "href": m.get("href", ""),
+                }
+                for m in page
+            ],
+            "has_more": len(all_messages) > offset + count,
+        }
+
+    hass.services.async_register(
+        DOMAIN, SERVICE_LIST_MESSAGES, _list_messages,
+        schema=vol.Schema({
+            vol.Required("entry"): cv.string,
+            vol.Optional("offset", default=0): vol.All(int, vol.Range(min=0)),
+            vol.Optional("count", default=10): vol.All(int, vol.Range(min=1, max=50)),
+        }),
         supports_response=SupportsResponse.ONLY,
     )
 

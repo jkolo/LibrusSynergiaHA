@@ -15,6 +15,12 @@ export interface LibrusCardConfig {
   entry_id: string;
   title?: string;
   only_unread?: boolean;
+  count?: number;
+}
+
+export interface MessageListResponse {
+  messages: HassMessage[];
+  has_more: boolean;
 }
 
 export interface HomeAssistant {
