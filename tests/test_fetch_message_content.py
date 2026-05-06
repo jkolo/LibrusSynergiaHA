@@ -60,7 +60,7 @@ async def test_fetch_content_returns_html(hass: HomeAssistant, loaded_entry):
 
 
 async def test_fetch_content_auto_marks_read(hass: HomeAssistant, loaded_entry):
-    """fetch_message_content sets is_read_in_ha=True after fetching."""
+    """fetch_message_content sets notification_dismissed=True after fetching."""
     coordinator = loaded_entry.runtime_data.coordinator
 
     await hass.services.async_call(
@@ -73,7 +73,7 @@ async def test_fetch_content_auto_marks_read(hass: HomeAssistant, loaded_entry):
     assert coordinator.read_messages_store.is_read("111")
     msgs = coordinator.data["messages"]
     msg = next(m for m in msgs if m["href"] == "111")
-    assert msg["is_read_in_ha"] is True
+    assert msg["notification_dismissed"] is True
 
 
 async def test_fetch_content_unknown_href_raises(hass: HomeAssistant, loaded_entry):

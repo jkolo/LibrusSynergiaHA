@@ -4,7 +4,7 @@ export interface HassMessage {
   date: string;
   unread: boolean;
   is_recent: boolean;
-  is_read_in_ha: boolean;
+  notification_dismissed: boolean;
   has_attachment: boolean;
   href: string;
 }

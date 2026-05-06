@@ -33,10 +33,10 @@ from .const import (
     DEFAULT_HUMANIZE,
     DOMAIN,
     OPT_HUMANIZE,
-    SERVICE_CLEAR_READ_MESSAGES,
+    SERVICE_CLEAR_DISMISSED_NOTIFICATIONS,
+    SERVICE_DISMISS_MESSAGE_NOTIFICATION,
     SERVICE_FETCH_MESSAGE_CONTENT,
-    SERVICE_MARK_MESSAGE_READ,
-    SERVICE_MARK_MESSAGE_UNREAD,
+    SERVICE_RESTORE_MESSAGE_NOTIFICATION,
 )
 from .coordinator import LibrusDataUpdateCoordinator
 from .humanize import build_headers, pick_user_agent
@@ -631,7 +631,7 @@ async def _async_options_updated(hass: HomeAssistant, entry: LibrusConfigEntry) 
 
 def _setup_services(hass: HomeAssistant) -> None:
     """Register mark-as-read services (no-op if already registered)."""
-    if hass.services.has_service(DOMAIN, SERVICE_MARK_MESSAGE_READ):
+    if hass.services.has_service(DOMAIN, SERVICE_DISMISS_MESSAGE_NOTIFICATION):
         return
 
     _schema_with_href = vol.Schema({
@@ -669,7 +669,7 @@ def _setup_services(hass: HomeAssistant) -> None:
             )
         return msg
 
-    async def _mark_read(call: ServiceCall) -> None:
+    async def _dismiss_notification(call: ServiceCall) -> None:
         import hashlib
         from homeassistant.components import persistent_notification
 
@@ -680,14 +680,14 @@ def _setup_services(hass: HomeAssistant) -> None:
         await coordinator.read_messages_store.async_mark_read(href)
         for m in (coordinator.data or {}).get("messages", []):
             if m.get("href") == href:
-                m["is_read_in_ha"] = True
+                m["notification_dismissed"] = True
                 break
         coordinator.async_set_updated_data(coordinator.data)
         href_hash = hashlib.sha1(href.encode()).hexdigest()[:10]
         notification_id = f"librus_apix_msg_{entry_id}_{href_hash}"
         persistent_notification.async_dismiss(hass, notification_id)
 
-    async def _mark_unread(call: ServiceCall) -> None:
+    async def _restore_notification(call: ServiceCall) -> None:
         entry_id: str = call.data["entry"]
         href: str = call.data["message_href"]
         coordinator = _resolve_coordinator(entry_id)
@@ -695,16 +695,16 @@ def _setup_services(hass: HomeAssistant) -> None:
         await coordinator.read_messages_store.async_mark_unread(href)
         for m in (coordinator.data or {}).get("messages", []):
             if m.get("href") == href:
-                m["is_read_in_ha"] = False
+                m["notification_dismissed"] = False
                 break
         coordinator.async_set_updated_data(coordinator.data)
 
-    async def _clear_read(call: ServiceCall) -> None:
+    async def _clear_dismissed(call: ServiceCall) -> None:
         entry_id: str = call.data["entry"]
         coordinator = _resolve_coordinator(entry_id)
         await coordinator.read_messages_store.async_clear()
         for m in (coordinator.data or {}).get("messages", []):
-            m["is_read_in_ha"] = False
+            m["notification_dismissed"] = False
         coordinator.async_set_updated_data(coordinator.data)
 
     async def _fetch_content(call: ServiceCall) -> dict:
@@ -722,19 +722,22 @@ def _setup_services(hass: HomeAssistant) -> None:
         await coordinator.read_messages_store.async_mark_read(href)
         for m in (coordinator.data or {}).get("messages", []):
             if m.get("href") == href:
-                m["is_read_in_ha"] = True
+                m["notification_dismissed"] = True
                 break
         coordinator.async_set_updated_data(coordinator.data)
         return content
 
     hass.services.async_register(
-        DOMAIN, SERVICE_MARK_MESSAGE_READ, _mark_read, schema=_schema_with_href,
+        DOMAIN, SERVICE_DISMISS_MESSAGE_NOTIFICATION, _dismiss_notification,
+        schema=_schema_with_href,
     )
     hass.services.async_register(
-        DOMAIN, SERVICE_MARK_MESSAGE_UNREAD, _mark_unread, schema=_schema_with_href,
+        DOMAIN, SERVICE_RESTORE_MESSAGE_NOTIFICATION, _restore_notification,
+        schema=_schema_with_href,
     )
     hass.services.async_register(
-        DOMAIN, SERVICE_CLEAR_READ_MESSAGES, _clear_read, schema=_schema_entry_only,
+        DOMAIN, SERVICE_CLEAR_DISMISSED_NOTIFICATIONS, _clear_dismissed,
+        schema=_schema_entry_only,
     )
     hass.services.async_register(
         DOMAIN, SERVICE_FETCH_MESSAGE_CONTENT, _fetch_content,

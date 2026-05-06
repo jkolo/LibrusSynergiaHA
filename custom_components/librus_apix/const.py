@@ -37,9 +37,9 @@ OPT_MESSAGE_NOTIFY = "message_notify"
 DEFAULT_MESSAGE_NOTIFY = False
 
 # Service names
-SERVICE_MARK_MESSAGE_READ = "mark_message_read"
-SERVICE_MARK_MESSAGE_UNREAD = "mark_message_unread"
-SERVICE_CLEAR_READ_MESSAGES = "clear_read_messages"
+SERVICE_DISMISS_MESSAGE_NOTIFICATION = "dismiss_message_notification"
+SERVICE_RESTORE_MESSAGE_NOTIFICATION = "restore_message_notification"
+SERVICE_CLEAR_DISMISSED_NOTIFICATIONS = "clear_dismissed_notifications"
 SERVICE_FETCH_MESSAGE_CONTENT = "fetch_message_content"
 
 # Bus events

@@ -37,7 +37,7 @@ ostatni segment z adresu URL (np. `/config/integrations/integration/librus_apix/
 
 - Lista ostatnich wiadomości z nadawcą, tytułem i datą.
 - Przycisk **Pokaż treść** — pobiera i wyświetla treść inline (HTML z Librusa po sanityzacji).
-- Przycisk **Oznacz jako przeczytaną** — ustawia lokalną flagę `is_read_in_ha`.
+- Przycisk **Odrzuć powiadomienie** — wycisza badge i powiadomienia HA (flaga `notification_dismissed`).
 - Filtr **tylko nieprzeczytane** — toggle per sesja.
 
 > **Uwaga privacy:** kliknięcie „Pokaż treść" wywołuje `librus_apix.fetch_message_content`,

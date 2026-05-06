@@ -113,7 +113,7 @@ async def test_mark_read_dismisses_notification(
     assert len(_librus_notifications(hass)) == 1
 
     await hass.services.async_call(
-        DOMAIN, "mark_message_read",
+        DOMAIN, "dismiss_message_notification",
         {"entry": entry_notify_on.entry_id, "message_href": "111"},
         blocking=True,
     )

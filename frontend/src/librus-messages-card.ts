@@ -38,7 +38,7 @@ export class LibrusMessagesCard extends LitElement {
     if (!state) return [];
     const msgs = (state.attributes["messages"] as HassMessage[]) ?? [];
     if (this._onlyUnread || this._config.only_unread) {
-      return msgs.filter((m) => m.unread && !m.is_read_in_ha);
+      return msgs.filter((m) => m.unread && !m.notification_dismissed);
     }
     return msgs;
   }
@@ -68,7 +68,7 @@ export class LibrusMessagesCard extends LitElement {
 
   private async _markRead(msg: HassMessage) {
     if (!this.hass || !this._config) return;
-    await this.hass.callService("librus_apix", "mark_message_read", {
+    await this.hass.callService("librus_apix", "dismiss_message_notification", {
       entry: this._config.entry_id,
       message_href: msg.href,
     });
@@ -204,7 +204,7 @@ export class LibrusMessagesCard extends LitElement {
   private _renderMessage(msg: HassMessage) {
     const isExpanded = this._expandedHref === msg.href;
     return html`
-      <div class="message-item ${msg.unread && !msg.is_read_in_ha ? "unread" : ""}">
+      <div class="message-item ${msg.unread && !msg.notification_dismissed ? "unread" : ""}">
         <div class="message-header">
           <div class="message-meta">
             <div class="message-sender">${msg.sender}</div>
@@ -217,10 +217,10 @@ export class LibrusMessagesCard extends LitElement {
               .path=${"M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z"}
               @click=${() => isExpanded ? this._closeContent() : this._showContent(msg)}
             ></ha-icon-button>
-            ${!msg.is_read_in_ha
+            ${!msg.notification_dismissed
               ? html`
                 <ha-icon-button
-                  .label=${"Oznacz jako przeczytaną"}
+                  .label=${"Odrzuć powiadomienie"}
                   .path=${"M9 16.2L4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4L9 16.2z"}
                   @click=${() => this._markRead(msg)}
                 ></ha-icon-button>

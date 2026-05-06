@@ -423,3 +423,30 @@ Funkcje karty:
 - Inline podgląd treści (sanityzowany HTML — bezpieczny rendering).
 - Przycisk "Oznacz jako przeczytaną" per wiadomość.
 - Filtr "tylko nieprzeczytane".
+
+---
+
+# Migracja v3.2 → v3.3
+
+v3.3.0 zawiera **breaking changes** w nazewnictwie — zmiana flagi i nazw serwisów na semantycznie
+poprawniejsze (poprzednia nazwa sugerowała "przeczytano w HA", podczas gdy flaga służy wyłącznie
+do wyciszania powiadomień w HA bez wpływu na Librusa).
+
+## Breaking changes
+
+### Atrybut sensora
+
+| Stara nazwa | Nowa nazwa |
+|---|---|
+| `messages[].is_read_in_ha` | `messages[].notification_dismissed` |
+| `unread_count_locally` | `undismissed_count` |
+
+### Nazwy serwisów
+
+| Stary serwis | Nowy serwis |
+|---|---|
+| `librus_apix.mark_message_read` | `librus_apix.dismiss_message_notification` |
+| `librus_apix.mark_message_unread` | `librus_apix.restore_message_notification` |
+| `librus_apix.clear_read_messages` | `librus_apix.clear_dismissed_notifications` |
+
+Zaktualizuj automatyzacje i szablony Lovelace po aktualizacji do v3.3.0.

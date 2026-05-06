@@ -1,9 +1,9 @@
-mark_message_read:
-  name: Oznacz wiadomość jako przeczytaną (lokalnie)
+dismiss_message_notification:
+  name: Odrzuć powiadomienie o wiadomości
   description: >
-    Oznacza wiadomość Librus jako przeczytaną w Home Assistant. NIE wpływa
-    na status w Librusie — w przeglądarce dziennika dalej będzie widoczna
-    jako nowa. Stan przeżywa restart HA.
+    Wycisza powiadomienie o wiadomości w Home Assistant (notification_dismissed=True).
+    NIE wpływa na status odczytu w Librusie — w przeglądarce dziennika dalej
+    będzie widoczna jako nowa. Stan przeżywa restart HA.
   fields:
     entry:
       name: Konto Librus
@@ -22,9 +22,9 @@ mark_message_read:
       selector:
         text:
 
-mark_message_unread:
-  name: Cofnij lokalne oznaczenie jako przeczytanej
-  description: Usuwa wiadomość z lokalnej listy "przeczytane" w Home Assistant.
+restore_message_notification:
+  name: Przywróć powiadomienie o wiadomości
+  description: Usuwa flagę notification_dismissed — powiadomienie pojawi się ponownie.
   fields:
     entry:
       name: Konto Librus
@@ -38,9 +38,9 @@ mark_message_unread:
       selector:
         text:
 
-clear_read_messages:
-  name: Wyczyść wszystkie lokalne oznaczenia
-  description: Usuwa wszystkie lokalne flagi "przeczytane" dla wybranego konta.
+clear_dismissed_notifications:
+  name: Wyczyść wszystkie odrzucone powiadomienia
+  description: Usuwa wszystkie flagi notification_dismissed dla wybranego konta.
   fields:
     entry:
       name: Konto Librus
@@ -58,7 +58,7 @@ fetch_message_content:
     UWAGA PRIVACY: pobranie treści SERVER-SIDE oznacza wiadomość jako
     przeczytaną w Librusie. W przeglądarce dziennika ikona "nowa" zniknie.
     Drugi rodzic na osobnym koncie nie jest dotknięty. Service automatycznie
-    oznacza wiadomość jako przeczytaną lokalnie (is_read_in_ha=True).
+    ustawia notification_dismissed=True.
   fields:
     entry:
       name: Konto Librus

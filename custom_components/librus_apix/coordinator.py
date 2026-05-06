@@ -772,7 +772,7 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         for msg in messages or []:
             href = msg.get("href", "")
             msg["is_recent"] = _is_recent(msg.get("date", ""))
-            msg["is_read_in_ha"] = (
+            msg["notification_dismissed"] = (
                 self.read_messages_store is not None
                 and bool(href)
                 and self.read_messages_store.is_read(href)

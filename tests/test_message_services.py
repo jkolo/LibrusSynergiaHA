@@ -43,12 +43,12 @@ async def loaded_entry(hass: HomeAssistant, mock_config_entry, mock_librus_clien
 
 
 async def test_mark_message_read_sets_flag(hass: HomeAssistant, loaded_entry):
-    """mark_message_read sets is_read_in_ha=True on the message and in the store."""
+    """mark_message_read sets notification_dismissed=True on the message and in the store."""
     coordinator = loaded_entry.runtime_data.coordinator
     entry_id = loaded_entry.entry_id
 
     await hass.services.async_call(
-        DOMAIN, "mark_message_read",
+        DOMAIN, "dismiss_message_notification",
         {"entry": entry_id, "message_href": "111"},
         blocking=True,
     )
@@ -56,30 +56,30 @@ async def test_mark_message_read_sets_flag(hass: HomeAssistant, loaded_entry):
     assert coordinator.read_messages_store.is_read("111")
     msgs = coordinator.data["messages"]
     msg_111 = next(m for m in msgs if m["href"] == "111")
-    assert msg_111["is_read_in_ha"] is True
+    assert msg_111["notification_dismissed"] is True
     # Other message unchanged
     msg_222 = next(m for m in msgs if m["href"] == "222")
-    assert msg_222["is_read_in_ha"] is False
+    assert msg_222["notification_dismissed"] is False
 
 
 async def test_mark_message_read_unknown_href_raises(hass: HomeAssistant, loaded_entry):
     """mark_message_read with unknown href raises ServiceValidationError."""
     with pytest.raises(ServiceValidationError):
         await hass.services.async_call(
-            DOMAIN, "mark_message_read",
+            DOMAIN, "dismiss_message_notification",
             {"entry": loaded_entry.entry_id, "message_href": "nonexistent"},
             blocking=True,
         )
 
 
 async def test_mark_message_unread(hass: HomeAssistant, loaded_entry):
-    """mark_message_unread removes the is_read_in_ha flag."""
+    """mark_message_unread removes the notification_dismissed flag."""
     coordinator = loaded_entry.runtime_data.coordinator
     entry_id = loaded_entry.entry_id
 
     # First mark as read
     await hass.services.async_call(
-        DOMAIN, "mark_message_read",
+        DOMAIN, "dismiss_message_notification",
         {"entry": entry_id, "message_href": "111"},
         blocking=True,
     )
@@ -87,21 +87,21 @@ async def test_mark_message_unread(hass: HomeAssistant, loaded_entry):
 
     # Now unread it
     await hass.services.async_call(
-        DOMAIN, "mark_message_unread",
+        DOMAIN, "restore_message_notification",
         {"entry": entry_id, "message_href": "111"},
         blocking=True,
     )
     assert not coordinator.read_messages_store.is_read("111")
     msgs = coordinator.data["messages"]
     msg_111 = next(m for m in msgs if m["href"] == "111")
-    assert msg_111["is_read_in_ha"] is False
+    assert msg_111["notification_dismissed"] is False
 
 
 async def test_mark_message_unread_unknown_href_raises(hass: HomeAssistant, loaded_entry):
     """mark_message_unread with unknown href raises ServiceValidationError."""
     with pytest.raises(ServiceValidationError):
         await hass.services.async_call(
-            DOMAIN, "mark_message_unread",
+            DOMAIN, "restore_message_notification",
             {"entry": loaded_entry.entry_id, "message_href": "nonexistent"},
             blocking=True,
         )
@@ -114,12 +114,12 @@ async def test_clear_read_messages(hass: HomeAssistant, loaded_entry):
 
     # Mark both as read
     await hass.services.async_call(
-        DOMAIN, "mark_message_read",
+        DOMAIN, "dismiss_message_notification",
         {"entry": entry_id, "message_href": "111"},
         blocking=True,
     )
     await hass.services.async_call(
-        DOMAIN, "mark_message_read",
+        DOMAIN, "dismiss_message_notification",
         {"entry": entry_id, "message_href": "222"},
         blocking=True,
     )
@@ -128,7 +128,7 @@ async def test_clear_read_messages(hass: HomeAssistant, loaded_entry):
 
     # Clear all
     await hass.services.async_call(
-        DOMAIN, "clear_read_messages",
+        DOMAIN, "clear_dismissed_notifications",
         {"entry": entry_id},
         blocking=True,
     )
@@ -136,7 +136,7 @@ async def test_clear_read_messages(hass: HomeAssistant, loaded_entry):
     assert not coordinator.read_messages_store.is_read("222")
     msgs = coordinator.data["messages"]
     for m in msgs:
-        assert m["is_read_in_ha"] is False
+        assert m["notification_dismissed"] is False
 
 
 async def test_services_multi_entry_routing(
@@ -170,7 +170,7 @@ async def test_services_multi_entry_routing(
     coord_b = entry_b.runtime_data.coordinator
 
     await hass.services.async_call(
-        DOMAIN, "mark_message_read",
+        DOMAIN, "dismiss_message_notification",
         {"entry": entry_a.entry_id, "message_href": "111"},
         blocking=True,
     )
