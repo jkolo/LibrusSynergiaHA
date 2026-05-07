@@ -44,6 +44,7 @@ from .const import (
     OPT_HUMANIZE,
     SERVICE_CLEAR_DISMISSED_NOTIFICATIONS,
     SERVICE_DISMISS_MESSAGE_NOTIFICATION,
+    SERVICE_DOWNLOAD_ATTACHMENT,
     SERVICE_FETCH_MESSAGE_CONTENT,
     SERVICE_LIST_MESSAGES,
     SERVICE_RESTORE_MESSAGE_NOTIFICATION,
@@ -706,17 +707,67 @@ class LibrusApiClient:
             content = soup.find("div", attrs={"class": "container-message-content"})
             if content is None:
                 raise ParseError("Error in parsing message content.")
+
+            # Rows 4+ may contain attachment links (td.left > a[href])
+            attachments: list[dict[str, str]] = []
+            for tr in trs[3:]:
+                td = tr.select_one("td.left")
+                if td:
+                    for a in td.select("a[href]"):
+                        name = a.get_text(strip=True)
+                        url = a.get("href", "")
+                        if name and url:
+                            attachments.append({"name": name, "url": url})
+
             return {
                 "author": unwrap_message_data(author_row),
                 "title": unwrap_message_data(title_row),
                 "date": unwrap_message_data(date_row),
                 "content": content.decode_contents(),
+                "attachments": attachments,
             }
 
         try:
             return await self._with_retry("message_content", _work)
         except Exception as exc:
             _LOGGER.warning("Could not fetch message content for %s: %s", href, exc)
+            return None
+
+
+    async def async_download_attachment(self, attachment_url: str) -> dict[str, Any] | None:
+        """Pobierz załącznik przez sesję Librusa i zwróć jako base64."""
+        def _work(client: Client) -> dict[str, Any]:
+            import base64
+            import os
+            import librus_apix.urls as _urls
+
+            full_url = (
+                _urls.BASE_URL + attachment_url
+                if attachment_url.startswith("/")
+                else attachment_url
+            )
+            response = client.get(full_url)
+            content_type = (
+                response.headers.get("Content-Type", "application/octet-stream")
+                .split(";")[0]
+                .strip()
+            )
+            cd = response.headers.get("Content-Disposition", "")
+            filename = ""
+            if "filename=" in cd:
+                filename = cd.split("filename=")[-1].strip().strip("\"'")
+            if not filename:
+                filename = os.path.basename(attachment_url.split("?")[0]) or "attachment"
+            return {
+                "filename": filename,
+                "content_type": content_type,
+                "data": base64.b64encode(response.content).decode("utf-8"),
+            }
+
+        try:
+            return await self._with_retry("attachment", _work)
+        except Exception as exc:
+            _LOGGER.warning("Could not download attachment %s: %s", attachment_url, exc)
             return None
 
 
@@ -821,6 +872,8 @@ def _setup_services(hass: HomeAssistant) -> None:
                 m["notification_dismissed"] = True
                 break
         coordinator.async_set_updated_data(coordinator.data)
+        # Ensure attachments key is always present (backwards-compat with older clients)
+        content.setdefault("attachments", [])
         return content
 
     hass.services.async_register(
@@ -874,6 +927,28 @@ def _setup_services(hass: HomeAssistant) -> None:
             vol.Required("entry"): cv.string,
             vol.Optional("offset", default=0): vol.All(int, vol.Range(min=0)),
             vol.Optional("count", default=10): vol.All(int, vol.Range(min=1, max=100)),
+        }),
+        supports_response=SupportsResponse.ONLY,
+    )
+
+    async def _download_attachment(call: ServiceCall) -> dict:
+        entry_id: str = call.data["entry"]
+        attachment_url: str = call.data["attachment_url"]
+        coordinator = _resolve_coordinator(entry_id)
+        result = await coordinator.client.async_download_attachment(attachment_url)
+        if result is None:
+            raise ServiceValidationError(
+                translation_domain=DOMAIN,
+                translation_key="attachment_download_failed",
+                translation_placeholders={"url": attachment_url},
+            )
+        return result
+
+    hass.services.async_register(
+        DOMAIN, SERVICE_DOWNLOAD_ATTACHMENT, _download_attachment,
+        schema=vol.Schema({
+            vol.Required("entry"): cv.string,
+            vol.Required("attachment_url"): cv.string,
         }),
         supports_response=SupportsResponse.ONLY,
     )

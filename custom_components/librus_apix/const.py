@@ -42,6 +42,7 @@ SERVICE_RESTORE_MESSAGE_NOTIFICATION = "restore_message_notification"
 SERVICE_CLEAR_DISMISSED_NOTIFICATIONS = "clear_dismissed_notifications"
 SERVICE_FETCH_MESSAGE_CONTENT = "fetch_message_content"
 SERVICE_LIST_MESSAGES = "list_messages"
+SERVICE_DOWNLOAD_ATTACHMENT = "download_attachment"
 
 # Bus events
 EVENT_NOWA_WIADOMOSC = "librus_apix_nowa_wiadomosc"

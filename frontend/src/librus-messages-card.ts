@@ -9,7 +9,8 @@ const ROW_HEIGHT = 52;
 // Dodatkowe wiersze renderowane powyżej i poniżej widocznego okna
 const BUFFER = 4;
 
-type DialogContent = { author: string; title: string; date: string; content: string };
+type Attachment = { name: string; url: string };
+type DialogContent = { author: string; title: string; date: string; content: string; attachments?: Attachment[] };
 
 @customElement("librus-messages-card")
 export class LibrusMessagesCard extends LitElement {
@@ -199,11 +200,53 @@ export class LibrusMessagesCard extends LitElement {
       entry: this._config.entry_id,
       message_href: href,
     });
-    // Zaktualizuj lokalnie bez czekania na refresh coordinatora
+    const updated = { ...this._selectedMsg, notification_dismissed: true };
     this._allMessages = this._allMessages.map((m) =>
-      m?.href === href ? { ...m, notification_dismissed: true } : m,
+      m?.href === href ? updated : m,
     );
-    this._dialog?.close();
+    this._selectedMsg = updated;
+  }
+
+  private async _restoreFromDialog() {
+    if (!this.hass || !this._config || !this._selectedMsg) return;
+    const href = this._selectedMsg.href;
+    await this.hass.callService("librus_apix", "restore_message_notification", {
+      entry: this._config.entry_id,
+      message_href: href,
+    });
+    const updated = { ...this._selectedMsg, notification_dismissed: false };
+    this._allMessages = this._allMessages.map((m) =>
+      m?.href === href ? updated : m,
+    );
+    this._selectedMsg = updated;
+  }
+
+  private async _downloadAttachment(name: string, url: string) {
+    if (!this.hass || !this._config) return;
+    try {
+      const result = await this.hass.callService(
+        "librus_apix",
+        "download_attachment",
+        { entry: this._config.entry_id, attachment_url: url },
+        undefined,
+        true,
+        true,
+      );
+      const data = (
+        (result as { response?: { filename: string; content_type: string; data: string } })?.response ?? result
+      ) as { filename: string; content_type: string; data: string };
+      const binary = atob(data.data);
+      const bytes = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+      const blob = new Blob([bytes], { type: data.content_type });
+      const link = document.createElement("a");
+      link.href = URL.createObjectURL(blob);
+      link.download = data.filename || name;
+      link.click();
+      URL.revokeObjectURL(link.href);
+    } catch {
+      // Błąd pobierania — nic nie rób (HA wyświetla własny alert)
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -403,12 +446,42 @@ export class LibrusMessagesCard extends LitElement {
       gap: 8px;
       flex-wrap: wrap;
     }
-    .attach-note {
+    .dlg-attachments {
+      padding: 10px 20px;
+      border-top: 1px solid var(--divider-color);
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      align-items: center;
+      flex-shrink: 0;
+    }
+    .dlg-attachments-header {
       display: flex;
       align-items: center;
       gap: 4px;
+      font-size: 0.82em;
       color: var(--secondary-text-color);
+      font-weight: 500;
+      width: 100%;
+    }
+    .btn-attachment {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      background: color-mix(in srgb, var(--primary-color) 10%, transparent);
+      color: var(--primary-color);
+      border: 1px solid color-mix(in srgb, var(--primary-color) 30%, transparent);
+      padding: 5px 10px;
+      border-radius: 4px;
+      cursor: pointer;
       font-size: 0.85em;
+      max-width: 100%;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .btn-attachment:hover {
+      background: color-mix(in srgb, var(--primary-color) 18%, transparent);
     }
     .dlg-footer-actions { display: flex; gap: 8px; margin-left: auto; }
     .btn-dismiss {
@@ -423,6 +496,15 @@ export class LibrusMessagesCard extends LitElement {
     .btn-close {
       background: var(--secondary-background-color);
       color: var(--primary-text-color);
+      border: 1px solid var(--divider-color);
+      padding: 8px 16px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 0.9em;
+    }
+    .btn-restore {
+      background: var(--secondary-background-color);
+      color: var(--secondary-text-color);
       border: 1px solid var(--divider-color);
       padding: 8px 16px;
       border-radius: 4px;
@@ -578,17 +660,37 @@ export class LibrusMessagesCard extends LitElement {
                 </div>`
               : nothing}
         </div>
-        <div class="dlg-footer">
-          ${msg?.has_attachment
-            ? html`<span class="attach-note">
+        ${this._dialogContent?.attachments?.length
+          ? html`<div class="dlg-attachments">
+              <div class="dlg-attachments-header">
                 <ha-icon icon="mdi:paperclip"></ha-icon>
-                Zawiera załącznik
-              </span>`
-            : nothing}
+                Załączniki
+              </div>
+              ${this._dialogContent.attachments.map(
+                (a) => html`
+                  <button
+                    class="btn-attachment"
+                    @click=${() => this._downloadAttachment(a.name, a.url)}
+                  >
+                    <ha-icon icon="mdi:download"></ha-icon>
+                    ${a.name}
+                  </button>
+                `,
+              )}
+            </div>`
+          : nothing}
+        <div class="dlg-footer">
           <div class="dlg-footer-actions">
-            ${msg && !msg.notification_dismissed
-              ? html`<button class="btn-dismiss" @click=${() => this._dismissFromDialog()}>
-                  Usuń powiadomienie
+            ${msg
+              ? html`<button
+                  class="${msg.notification_dismissed ? "btn-restore" : "btn-dismiss"}"
+                  @click=${msg.notification_dismissed
+                    ? () => this._restoreFromDialog()
+                    : () => this._dismissFromDialog()}
+                >
+                  ${msg.notification_dismissed
+                    ? "Przywróć powiadomienie"
+                    : "Oznacz jako przeczytane"}
                 </button>`
               : nothing}
             <button class="btn-close" @click=${() => this._dialog?.close()}>
