@@ -114,7 +114,8 @@ export class LibrusMessagesCard extends LitElement {
       const unique = newMsgs.filter((m) => !existing.has(m.href));
       this._loadedMessages = [...this._loadedMessages, ...unique];
     } catch {
-      this._hasMore = false;
+      // Nie zerujemy _hasMore przy transientem błędzie (np. restart HA) —
+      // IntersectionObserver odpali ponownie przy następnym scrollu.
     } finally {
       this._isLoadingMore = false;
     }

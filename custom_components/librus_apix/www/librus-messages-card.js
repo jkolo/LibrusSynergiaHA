@@ -285,21 +285,21 @@ S.elementStyles = [], S.shadowRootOptions = { mode: "open" }, S[P("elementProper
  * SPDX-License-Identifier: BSD-3-Clause
  */
 const k = globalThis, te = (i) => i, R = k.trustedTypes, se = R ? R.createPolicy("lit-html", { createHTML: (i) => i }) : void 0, ce = "$lit$", m = `lit$${Math.random().toFixed(9).slice(2)}$`, he = "?" + m, Ee = `<${he}>`, w = document, O = () => w.createComment(""), T = (i) => i === null || typeof i != "object" && typeof i != "function", G = Array.isArray, Se = (i) => G(i) || typeof (i == null ? void 0 : i[Symbol.iterator]) == "function", B = `[ 	
-\f\r]`, C = /<(?:(!--|\/[^a-zA-Z])|(\/?[a-zA-Z][^>\s]*)|(\/?$))/g, ie = /-->/g, re = />/g, b = RegExp(`>|${B}(?:([^\\s"'>=/]+)(${B}*=${B}*(?:[^ 	
-\f\r"'\`<>=]|("|')|))|$)`, "g"), oe = /'/g, ne = /"/g, pe = /^(?:script|style|textarea|title)$/i, Me = (i) => (e, ...t) => ({ _$litType$: i, strings: e, values: t }), g = Me(1), E = Symbol.for("lit-noChange"), d = Symbol.for("lit-nothing"), ae = /* @__PURE__ */ new WeakMap(), A = w.createTreeWalker(w, 129);
+\f\r]`, M = /<(?:(!--|\/[^a-zA-Z])|(\/?[a-zA-Z][^>\s]*)|(\/?$))/g, ie = /-->/g, re = />/g, b = RegExp(`>|${B}(?:([^\\s"'>=/]+)(${B}*=${B}*(?:[^ 	
+\f\r"'\`<>=]|("|')|))|$)`, "g"), oe = /'/g, ne = /"/g, pe = /^(?:script|style|textarea|title)$/i, Ce = (i) => (e, ...t) => ({ _$litType$: i, strings: e, values: t }), g = Ce(1), E = Symbol.for("lit-noChange"), d = Symbol.for("lit-nothing"), ae = /* @__PURE__ */ new WeakMap(), A = w.createTreeWalker(w, 129);
 function ue(i, e) {
   if (!G(i) || !i.hasOwnProperty("raw")) throw Error("invalid template strings array");
   return se !== void 0 ? se.createHTML(e) : e;
 }
-const Ce = (i, e) => {
+const Me = (i, e) => {
   const t = i.length - 1, s = [];
-  let r, o = e === 2 ? "<svg>" : e === 3 ? "<math>" : "", n = C;
+  let r, o = e === 2 ? "<svg>" : e === 3 ? "<math>" : "", n = M;
   for (let a = 0; a < t; a++) {
     const l = i[a];
     let h, p, c = -1, _ = 0;
-    for (; _ < l.length && (n.lastIndex = _, p = n.exec(l), p !== null); ) _ = n.lastIndex, n === C ? p[1] === "!--" ? n = ie : p[1] !== void 0 ? n = re : p[2] !== void 0 ? (pe.test(p[2]) && (r = RegExp("</" + p[2], "g")), n = b) : p[3] !== void 0 && (n = b) : n === b ? p[0] === ">" ? (n = r ?? C, c = -1) : p[1] === void 0 ? c = -2 : (c = n.lastIndex - p[2].length, h = p[1], n = p[3] === void 0 ? b : p[3] === '"' ? ne : oe) : n === ne || n === oe ? n = b : n === ie || n === re ? n = C : (n = b, r = void 0);
+    for (; _ < l.length && (n.lastIndex = _, p = n.exec(l), p !== null); ) _ = n.lastIndex, n === M ? p[1] === "!--" ? n = ie : p[1] !== void 0 ? n = re : p[2] !== void 0 ? (pe.test(p[2]) && (r = RegExp("</" + p[2], "g")), n = b) : p[3] !== void 0 && (n = b) : n === b ? p[0] === ">" ? (n = r ?? M, c = -1) : p[1] === void 0 ? c = -2 : (c = n.lastIndex - p[2].length, h = p[1], n = p[3] === void 0 ? b : p[3] === '"' ? ne : oe) : n === ne || n === oe ? n = b : n === ie || n === re ? n = M : (n = b, r = void 0);
     const $ = n === b && i[a + 1].startsWith("/>") ? " " : "";
-    o += n === C ? l + Ee : c >= 0 ? (s.push(h), l.slice(0, c) + ce + l.slice(c) + m + $) : l + m + (c === -2 ? a : $);
+    o += n === M ? l + Ee : c >= 0 ? (s.push(h), l.slice(0, c) + ce + l.slice(c) + m + $) : l + m + (c === -2 ? a : $);
   }
   return [ue(i, o + (i[t] || "<?>") + (e === 2 ? "</svg>" : e === 3 ? "</math>" : "")), s];
 };
@@ -308,7 +308,7 @@ class z {
     let r;
     this.parts = [];
     let o = 0, n = 0;
-    const a = e.length - 1, l = this.parts, [h, p] = Ce(e, t);
+    const a = e.length - 1, l = this.parts, [h, p] = Me(e, t);
     if (this.el = z.createElement(h, s), A.currentNode = this.el.content, t === 2 || t === 3) {
       const c = this.el.content.firstChild;
       c.replaceWith(...c.childNodes);
@@ -340,12 +340,12 @@ class z {
     return s.innerHTML = e, s;
   }
 }
-function M(i, e, t = i, s) {
+function C(i, e, t = i, s) {
   var n, a;
   if (e === E) return e;
   let r = s !== void 0 ? (n = t._$Co) == null ? void 0 : n[s] : t._$Cl;
   const o = T(e) ? void 0 : e._$litDirective$;
-  return (r == null ? void 0 : r.constructor) !== o && ((a = r == null ? void 0 : r._$AO) == null || a.call(r, !1), o === void 0 ? r = void 0 : (r = new o(i), r._$AT(i, t, s)), s !== void 0 ? (t._$Co ?? (t._$Co = []))[s] = r : t._$Cl = r), r !== void 0 && (e = M(i, r._$AS(i, e.values), r, s)), e;
+  return (r == null ? void 0 : r.constructor) !== o && ((a = r == null ? void 0 : r._$AO) == null || a.call(r, !1), o === void 0 ? r = void 0 : (r = new o(i), r._$AT(i, t, s)), s !== void 0 ? (t._$Co ?? (t._$Co = []))[s] = r : t._$Cl = r), r !== void 0 && (e = C(i, r._$AS(i, e.values), r, s)), e;
 }
 class Pe {
   constructor(e, t) {
@@ -395,7 +395,7 @@ class N {
     return this._$AB;
   }
   _$AI(e, t = this) {
-    e = M(this, e, t), T(e) ? e === d || e == null || e === "" ? (this._$AH !== d && this._$AR(), this._$AH = d) : e !== this._$AH && e !== E && this._(e) : e._$litType$ !== void 0 ? this.$(e) : e.nodeType !== void 0 ? this.T(e) : Se(e) ? this.k(e) : this._(e);
+    e = C(this, e, t), T(e) ? e === d || e == null || e === "" ? (this._$AH !== d && this._$AR(), this._$AH = d) : e !== this._$AH && e !== E && this._(e) : e._$litType$ !== void 0 ? this.$(e) : e.nodeType !== void 0 ? this.T(e) : Se(e) ? this.k(e) : this._(e);
   }
   O(e) {
     return this._$AA.parentNode.insertBefore(e, this._$AB);
@@ -451,11 +451,11 @@ class j {
   _$AI(e, t = this, s, r) {
     const o = this.strings;
     let n = !1;
-    if (o === void 0) e = M(this, e, t, 0), n = !T(e) || e !== this._$AH && e !== E, n && (this._$AH = e);
+    if (o === void 0) e = C(this, e, t, 0), n = !T(e) || e !== this._$AH && e !== E, n && (this._$AH = e);
     else {
       const a = e;
       let l, h;
-      for (e = o[0], l = 0; l < o.length - 1; l++) h = M(this, a[s + l], t, l), h === E && (h = this._$AH[l]), n || (n = !T(h) || h !== this._$AH[l]), h === d ? e = d : e !== d && (e += (h ?? "") + o[l + 1]), this._$AH[l] = h;
+      for (e = o[0], l = 0; l < o.length - 1; l++) h = C(this, a[s + l], t, l), h === E && (h = this._$AH[l]), n || (n = !T(h) || h !== this._$AH[l]), h === d ? e = d : e !== d && (e += (h ?? "") + o[l + 1]), this._$AH[l] = h;
     }
     n && !r && this.j(e);
   }
@@ -484,7 +484,7 @@ class Oe extends j {
     super(e, t, s, r, o), this.type = 5;
   }
   _$AI(e, t = this) {
-    if ((e = M(this, e, t, 0) ?? d) === E) return;
+    if ((e = C(this, e, t, 0) ?? d) === E) return;
     const s = this._$AH, r = e === d && s !== d || e.capture !== s.capture || e.once !== s.once || e.passive !== s.passive, o = e !== d && (s === d || r);
     r && this.element.removeEventListener(this.name, this, s), o && this.element.addEventListener(this.name, this, e), this._$AH = e;
   }
@@ -501,7 +501,7 @@ class Te {
     return this._$AM._$AU;
   }
   _$AI(e) {
-    M(this, e);
+    C(this, e);
   }
 }
 const q = k.litHtmlPolyfillSupport;
@@ -784,7 +784,6 @@ let u = class extends U {
       const o = new Set(this._loadedMessages.map((a) => a.href)), n = r.filter((a) => !o.has(a.href));
       this._loadedMessages = [...this._loadedMessages, ...n];
     } catch {
-      this._hasMore = !1;
     } finally {
       this._isLoadingMore = !1;
     }
