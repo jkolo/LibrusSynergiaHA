@@ -33,7 +33,9 @@ async def test_domain_setup_registers_frontend_card(hass: HomeAssistant) -> None
     call_args = mock_http.async_register_static_paths.call_args[0][0]
     assert len(call_args) == 1
     assert call_args[0].url_path == "/librus_apix/librus-messages-card.js"
-    mock_ensure.assert_called_once_with(hass, "/librus_apix/librus-messages-card.js")
+    called_url: str = mock_ensure.call_args[0][1]
+    assert called_url.startswith("/librus_apix/librus-messages-card.js")
+    assert "?v=" in called_url
 
 
 async def test_domain_setup_skips_registration_when_file_missing(hass: HomeAssistant) -> None:

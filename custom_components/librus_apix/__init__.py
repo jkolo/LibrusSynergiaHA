@@ -57,7 +57,17 @@ _LOGGER = logging.getLogger(__name__)
 
 PLATFORMS = ["sensor", "calendar", "event"]
 
-_CARD_URL = "/librus_apix/librus-messages-card.js"
+_CARD_PATH = "/librus_apix/librus-messages-card.js"
+
+
+def _card_url_with_version() -> str:
+    """Zwróć URL karty z ?v= z manifest.json — bust cache przy update."""
+    import json
+    try:
+        manifest = json.loads((Path(__file__).parent / "manifest.json").read_text())
+        return f"{_CARD_PATH}?v={manifest['version']}"
+    except Exception:  # noqa: BLE001
+        return _CARD_PATH
 
 
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
@@ -65,41 +75,60 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     card_path = Path(__file__).parent / "www" / "librus-messages-card.js"
     if card_path.exists() and hass.http is not None:
         await hass.http.async_register_static_paths([
-            StaticPathConfig(_CARD_URL, str(card_path), cache_headers=False),
+            StaticPathConfig(_CARD_PATH, str(card_path), cache_headers=False),
         ])
-        hass.async_create_task(_async_ensure_lovelace_resource(hass, _CARD_URL))
-        _LOGGER.debug("Librus messages card static path registered at %s", _CARD_URL)
+        hass.async_create_task(_async_ensure_lovelace_resource(hass, _card_url_with_version()))
+        _LOGGER.debug("Librus messages card static path registered at %s", _CARD_PATH)
     return True
 
 
 async def _async_ensure_lovelace_resource(hass: HomeAssistant, url: str) -> None:
-    """Dodaj url do kolekcji Lovelace resources jeśli jeszcze go tam nie ma."""
+    """Dodaj lub zaktualizuj wpis karty Lovelace.
+
+    Dopasowuje po ścieżce (bez query string) — jeśli wpis istnieje z inną
+    wersją (np. ?v=3.5.0), podmienia go na nowy URL żeby wymusić reload JS.
+    """
     from homeassistant.helpers.storage import Store
+
+    base_path = url.split("?")[0]
 
     store = Store(hass, 1, "lovelace_resources", minor_version=1)
     data = await store.async_load() or {"items": []}
+    items: list[dict] = data.setdefault("items", [])
 
-    if any(item.get("url") == url for item in data.get("items", [])):
-        return
+    existing = next(
+        (item for item in items if item.get("url", "").split("?")[0] == base_path),
+        None,
+    )
+    if existing:
+        if existing.get("url") == url:
+            return  # Ten sam URL+wersja — nic do roboty
+        existing["url"] = url  # Zaktualizuj wersję (cache bust)
+        _LOGGER.info("Updated Lovelace resource to %s", url)
+    else:
+        items.append({"id": uuid.uuid4().hex, "url": url, "type": "module"})
+        _LOGGER.info("Registered Lovelace resource: %s (effective after browser reload)", url)
 
-    data.setdefault("items", []).append({
-        "id": uuid.uuid4().hex,
-        "url": url,
-        "type": "module",
-    })
     await store.async_save(data)
-    _LOGGER.info("Registered Lovelace resource: %s (effective after browser reload)", url)
 
     # Powiadom na żywo aktywną kolekcję zasobów (działa gdy lovelace już skonfigurowane)
     lovelace_resources = hass.data.get("lovelace", {}).get("resources")
     if lovelace_resources is not None:
         try:
-            existing = {item.get("url") for item in lovelace_resources.async_items()}
-            if url not in existing:
+            live_items = lovelace_resources.async_items()
+            live_existing = next(
+                (i for i in live_items if i.get("url", "").split("?")[0] == base_path),
+                None,
+            )
+            if live_existing is None:
                 await lovelace_resources.async_create_item({"res_type": "module", "url": url})
-                _LOGGER.debug("Lovelace resource registered live: %s", url)
+            elif live_existing.get("url") != url:
+                await lovelace_resources.async_update_item(
+                    live_existing["id"], {"res_type": "module", "url": url}
+                )
+            _LOGGER.debug("Lovelace resource live-updated: %s", url)
         except Exception as exc:  # noqa: BLE001
-            _LOGGER.debug("Could not register Lovelace resource live: %s", exc)
+            _LOGGER.debug("Could not update Lovelace resource live: %s", exc)
 
 
 @dataclass
