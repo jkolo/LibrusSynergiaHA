@@ -225,6 +225,7 @@ async def test_list_messages_first_page(hass: HomeAssistant, loaded_entry_25):
     assert result is not None
     assert len(result["messages"]) == 10
     assert result["has_more"] is True
+    assert result["total_count"] == 25
     assert result["messages"][0]["sender"] == "Nadawca0"
     assert result["messages"][9]["sender"] == "Nadawca9"
 
@@ -241,6 +242,7 @@ async def test_list_messages_last_page(hass: HomeAssistant, loaded_entry_25):
     assert result is not None
     assert len(result["messages"]) == 5
     assert result["has_more"] is False
+    assert result["total_count"] == 25
 
 
 async def test_list_messages_maps_fields(hass: HomeAssistant, loaded_entry_25):

@@ -865,6 +865,7 @@ def _setup_services(hass: HomeAssistant) -> None:
                 for m in page
             ],
             "has_more": len(all_messages) > offset + count,
+            "total_count": len(all_messages),
         }
 
     hass.services.async_register(

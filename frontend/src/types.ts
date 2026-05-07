@@ -21,6 +21,7 @@ export interface LibrusCardConfig {
 export interface MessageListResponse {
   messages: HassMessage[];
   has_more: boolean;
+  total_count: number;
 }
 
 export interface HomeAssistant {

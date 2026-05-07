@@ -4,6 +4,11 @@ import { unsafeHTML } from "lit/directives/unsafe-html.js";
 import { sanitizeHtml } from "./sanitize.js";
 import type { HassMessage, HomeAssistant, LibrusCardConfig, MessageListResponse } from "./types.js";
 
+// Stała wysokość wiersza — musi zgadzać się z CSS .message-item { height: 52px }
+const ROW_HEIGHT = 52;
+// Dodatkowe wiersze renderowane powyżej i poniżej widocznego okna
+const BUFFER = 4;
+
 type DialogContent = { author: string; title: string; date: string; content: string };
 
 @customElement("librus-messages-card")
@@ -13,19 +18,18 @@ export class LibrusMessagesCard extends LitElement {
   @state() private _config?: LibrusCardConfig;
   @state() private _onlyUnread = false;
 
+  // Virtual scroll state
+  @state() private _allMessages: (HassMessage | null)[] = [];
+  @state() private _totalCount = 0;
+  @state() private _scrollTop = 0;
+  private _fetchingOffsets = new Set<number>();
+  private _scrollRaf?: number;
+
   // Popup state
   @state() private _selectedMsg: HassMessage | null = null;
   @state() private _dialogContent: DialogContent | null = null;
   @state() private _dialogLoading = false;
   @query("dialog") private _dialog?: HTMLDialogElement;
-
-  // Infinity scroll state
-  @state() private _loadedMessages: HassMessage[] = [];
-  @state() private _hasMore = true;
-  @state() private _isLoadingMore = false;
-  private _observer?: IntersectionObserver;
-  private _sentinelEl?: Element;
-  @query(".message-list") private _listEl?: HTMLElement;
 
   static getStubConfig() {
     return { entity: "", entry_id: "", count: 10 };
@@ -41,92 +45,41 @@ export class LibrusMessagesCard extends LitElement {
     return 4;
   }
 
-  connectedCallback() {
-    super.connectedCallback();
-    // If reconnecting after disconnect (firstUpdated already ran), rebuild now.
-    if (this._listEl) this._createObserver();
-  }
-
   firstUpdated() {
-    this._createObserver();
-    // Set list height CSS variable based on count config.
-    this._updateListHeight();
-  }
-
-  disconnectedCallback() {
-    super.disconnectedCallback();
-    this._observer?.disconnect();
-    this._observer = undefined;
-    this._sentinelEl = undefined;
-  }
-
-  private _createObserver() {
-    this._observer?.disconnect();
-    this._observer = new IntersectionObserver(
-      ([entry]) => {
-        if (entry.isIntersecting && !this._isLoadingMore && this._hasMore) {
-          void this._loadMore();
-        }
-      },
-      { root: this._listEl, rootMargin: "60px" },
-    );
-    // Re-wire sentinel if already in DOM.
-    const sentinel = this.shadowRoot?.querySelector(".sentinel");
-    if (sentinel) {
-      this._sentinelEl = sentinel;
-      this._observer.observe(sentinel);
-    }
-  }
-
-  private _updateListHeight() {
-    const count = this._config?.count ?? 10;
-    this.style.setProperty("--ml-height", `${count * 52}px`);
+    // Pierwszy fetch: poznajemy total_count i ładujemy pierwsze wiersze.
+    void this._fetchAt(0);
   }
 
   updated(changedProps: Map<string, unknown>) {
     super.updated(changedProps);
-
-    if (changedProps.has("_config")) this._updateListHeight();
-
-    if (changedProps.has("hass") && this._loadedMessages.length === 0) {
-      const initial = this._messagesFromSensor;
-      if (initial.length > 0) {
-        this._loadedMessages = [...initial];
-        this._hasMore = initial.length >= (this._config?.count ?? 10);
-      }
-    }
-
-    // Wire sentinel to observer whenever it appears/disappears in DOM.
-    const sentinel = this.shadowRoot?.querySelector(".sentinel");
-    if (sentinel && sentinel !== this._sentinelEl) {
-      if (this._sentinelEl) this._observer?.unobserve(this._sentinelEl);
-      this._sentinelEl = sentinel;
-      this._observer?.observe(sentinel);
-    } else if (!sentinel && this._sentinelEl) {
-      this._observer?.unobserve(this._sentinelEl);
-      this._sentinelEl = undefined;
+    // Gdy filtr właśnie się włączył — ładuj wszystkie strony, żeby filtrowanie
+    // pokazywało kompletny zbiór nieprzeczytanych.
+    if (changedProps.has("_onlyUnread") && this._onlyUnread && this._totalCount > 0) {
+      this._fetchAll();
     }
   }
 
-  private get _messagesFromSensor(): HassMessage[] {
-    if (!this.hass || !this._config) return [];
-    const state = this.hass.states[this._config.entity];
-    if (!state) return [];
-    return (state.attributes["messages"] as HassMessage[]) ?? [];
+  private get _listHeight() {
+    return (this._config?.count ?? 10) * ROW_HEIGHT;
   }
 
-  private get _displayedMessages(): HassMessage[] {
-    if (this._onlyUnread || this._config?.only_unread) {
-      return this._loadedMessages.filter((m) => m.unread && !m.notification_dismissed);
-    }
-    return this._loadedMessages;
+  private get _visibleRows() {
+    return Math.ceil(this._listHeight / ROW_HEIGHT);
   }
 
-  private async _loadMore() {
-    if (!this.hass || !this._config || this._isLoadingMore) return;
-    this._isLoadingMore = true;
+  private get _filterActive() {
+    return this._onlyUnread || Boolean(this._config?.only_unread);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Data loading
+  // ---------------------------------------------------------------------------
+
+  private async _fetchAt(offset: number) {
+    if (this._fetchingOffsets.has(offset) || !this.hass || !this._config) return;
+    if (this._totalCount > 0 && offset >= this._totalCount) return;
+    this._fetchingOffsets.add(offset);
     const count = this._config.count ?? 10;
-    const offset = this._loadedMessages.length;
     try {
       const result = await this.hass.callService(
         "librus_apix",
@@ -136,20 +89,77 @@ export class LibrusMessagesCard extends LitElement {
         false,
         true,
       );
-      const data = ((result as { response?: MessageListResponse })?.response ??
-        result) as MessageListResponse;
-      const newMsgs = data.messages ?? [];
-      this._hasMore = data.has_more === true;
-      const existing = new Set(this._loadedMessages.map((m) => m.href));
-      const unique = newMsgs.filter((m) => !existing.has(m.href));
-      this._loadedMessages = [...this._loadedMessages, ...unique];
-    } catch {
-      // Nie zerujemy _hasMore przy transientem błędzie (np. restart HA) —
-      // IntersectionObserver odpali ponownie przy następnym scrollu.
+      const data = (
+        (result as { response?: MessageListResponse })?.response ?? result
+      ) as MessageListResponse;
+      const newMsgs: HassMessage[] = data.messages ?? [];
+      const total: number = data.total_count ?? (newMsgs.length + offset);
+
+      // Resize array when total changes
+      if (total !== this._totalCount || this._allMessages.length !== total) {
+        const arr = new Array<HassMessage | null>(total).fill(null);
+        this._allMessages.forEach((m, i) => {
+          if (m) arr[i] = m;
+        });
+        this._allMessages = arr;
+        this._totalCount = total;
+        // Jeśli filtr aktywny i właśnie poznaliśmy total — załaduj resztę
+        if (this._filterActive) this._fetchAll();
+      }
+
+      // Wstaw załadowane wiersze
+      const arr = [...this._allMessages];
+      newMsgs.forEach((msg, i) => {
+        if (offset + i < arr.length) arr[offset + i] = msg;
+      });
+      this._allMessages = arr;
     } finally {
-      this._isLoadingMore = false;
+      this._fetchingOffsets.delete(offset);
     }
   }
+
+  private _fetchAll() {
+    if (!this._config) return;
+    const count = this._config.count ?? 10;
+    for (let offset = 0; offset < this._totalCount; offset += count) {
+      if (this._fetchingOffsets.has(offset)) continue;
+      const sliceEnd = Math.min(offset + count, this._totalCount);
+      const hasNulls = this._allMessages.slice(offset, sliceEnd).some((m) => m === null);
+      if (hasNulls) void this._fetchAt(offset);
+    }
+  }
+
+  private _ensureLoaded(startIdx: number, endIdx: number) {
+    const count = this._config?.count ?? 10;
+    const pageStart = Math.floor(startIdx / count);
+    const pageEnd = Math.floor(Math.max(0, endIdx - 1) / count);
+    for (let page = pageStart; page <= pageEnd; page++) {
+      const offset = page * count;
+      if (offset >= this._totalCount) break;
+      if (this._fetchingOffsets.has(offset)) continue;
+      const sliceEnd = Math.min(offset + count, this._totalCount);
+      const hasNulls = this._allMessages.slice(offset, sliceEnd).some((m) => m === null);
+      if (hasNulls) void this._fetchAt(offset);
+    }
+  }
+
+  private _onScroll(e: Event) {
+    const scrollTop = (e.target as HTMLElement).scrollTop;
+    if (this._scrollRaf) cancelAnimationFrame(this._scrollRaf);
+    this._scrollRaf = requestAnimationFrame(() => {
+      this._scrollTop = scrollTop;
+      const startIdx = Math.max(0, Math.floor(scrollTop / ROW_HEIGHT) - BUFFER);
+      const endIdx = Math.min(
+        this._totalCount,
+        startIdx + this._visibleRows + BUFFER * 2,
+      );
+      this._ensureLoaded(startIdx, endIdx);
+    });
+  }
+
+  // ---------------------------------------------------------------------------
+  // Dialog
+  // ---------------------------------------------------------------------------
 
   private async _openDialog(msg: HassMessage) {
     if (!this.hass || !this._config) return;
@@ -166,8 +176,9 @@ export class LibrusMessagesCard extends LitElement {
         true,
         true,
       );
-      const data = ((result as { response?: DialogContent })?.response ??
-        result) as DialogContent;
+      const data = (
+        (result as { response?: DialogContent })?.response ?? result
+      ) as DialogContent;
       this._dialogContent = data;
     } catch {
       this._dialogContent = {
@@ -188,12 +199,16 @@ export class LibrusMessagesCard extends LitElement {
       entry: this._config.entry_id,
       message_href: href,
     });
-    // Update local copy immediately so filter reflects the dismiss without reload
-    this._loadedMessages = this._loadedMessages.map((m) =>
-      m.href === href ? { ...m, notification_dismissed: true } : m,
+    // Zaktualizuj lokalnie bez czekania na refresh coordinatora
+    this._allMessages = this._allMessages.map((m) =>
+      m?.href === href ? { ...m, notification_dismissed: true } : m,
     );
     this._dialog?.close();
   }
+
+  // ---------------------------------------------------------------------------
+  // Styles
+  // ---------------------------------------------------------------------------
 
   static styles = css`
     :host {
@@ -220,24 +235,39 @@ export class LibrusMessagesCard extends LitElement {
       color: var(--secondary-text-color);
       cursor: pointer;
     }
+
+    /* Lista — stała wysokość, wewnętrzny scroll */
     .message-list {
-      padding: 0 8px 8px;
-      height: var(--ml-height, 520px);
       overflow-y: auto;
       overflow-x: hidden;
       scrollbar-width: thin;
       scrollbar-color: var(--scrollbar-thumb-color, var(--divider-color)) transparent;
     }
+
+    /* Wirtualna przestrzeń — wysokość = total_count * ROW_HEIGHT, scroll tu */
+    .virtual-spacer {
+      position: relative;
+    }
+
+    /* Okno renderowanych wierszy — absolutnie pozycjonowane wewnątrz spacera */
+    .virtual-window {
+      position: absolute;
+      left: 0;
+      right: 0;
+    }
+
+    /* KLUCZOWE: każdy wiersz ma ściśle 52px — musi zgadzać się z ROW_HEIGHT w TS */
     .message-item {
-      border-radius: 8px;
-      margin-bottom: 4px;
-      padding: 10px 12px;
+      height: 52px;
+      box-sizing: border-box;
+      padding: 0 12px;
       display: flex;
-      justify-content: space-between;
-      align-items: flex-start;
+      align-items: center;
       gap: 8px;
       cursor: pointer;
-      transition: background 0.15s;
+      border-radius: 6px;
+      transition: background 0.12s;
+      overflow: hidden;
     }
     .message-item:hover {
       background: color-mix(in srgb, var(--primary-color) 6%, transparent);
@@ -251,42 +281,64 @@ export class LibrusMessagesCard extends LitElement {
     .message-meta {
       flex: 1;
       min-width: 0;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      gap: 2px;
     }
     .message-sender {
       font-weight: 500;
-      font-size: 0.9rem;
+      font-size: 0.88rem;
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
+      line-height: 1.2;
     }
     .message-title {
-      font-size: 0.85rem;
+      font-size: 0.82rem;
       color: var(--secondary-text-color);
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
+      line-height: 1.2;
     }
     .attach-icon {
-      --mdi-icon-size: 14px;
+      --mdi-icon-size: 13px;
       vertical-align: middle;
       color: var(--secondary-text-color);
       margin-right: 2px;
     }
     .message-date {
-      font-size: 0.75rem;
+      font-size: 0.72rem;
       color: var(--disabled-text-color);
       white-space: nowrap;
       flex-shrink: 0;
     }
-    .sentinel {
-      height: 1px;
+
+    /* Szkielet dla niezaładowanych wierszy */
+    .message-item.skeleton {
+      cursor: default;
+      pointer-events: none;
     }
-    .loading-more {
-      text-align: center;
-      padding: 8px;
-      font-size: 0.85rem;
-      color: var(--secondary-text-color);
+    .skel {
+      border-radius: 4px;
+      background: linear-gradient(
+        90deg,
+        color-mix(in srgb, var(--primary-text-color) 6%, transparent) 0%,
+        color-mix(in srgb, var(--primary-text-color) 12%, transparent) 50%,
+        color-mix(in srgb, var(--primary-text-color) 6%, transparent) 100%
+      );
+      background-size: 200% 100%;
+      animation: shimmer 1.4s infinite;
     }
+    @keyframes shimmer {
+      0% { background-position: 200% 0; }
+      100% { background-position: -200% 0; }
+    }
+    .skel.sender { width: 55%; height: 11px; margin-bottom: 4px; }
+    .skel.title  { width: 38%; height: 10px; }
+    .skel.date   { width: 60px; height: 9px; }
+
     .empty {
       text-align: center;
       padding: 16px;
@@ -294,7 +346,7 @@ export class LibrusMessagesCard extends LitElement {
       font-size: 0.9rem;
     }
 
-    /* Dialog — display controlled by browser via [open] attribute */
+    /* Dialog */
     dialog {
       max-width: min(700px, 95vw);
       max-height: 85vh;
@@ -323,10 +375,7 @@ export class LibrusMessagesCard extends LitElement {
       flex-shrink: 0;
       gap: 8px;
     }
-    .dlg-meta {
-      flex: 1;
-      min-width: 0;
-    }
+    .dlg-meta { flex: 1; min-width: 0; }
     .dlg-sender {
       font-weight: 500;
       font-size: 0.85em;
@@ -338,30 +387,12 @@ export class LibrusMessagesCard extends LitElement {
       margin: 4px 0 2px;
       word-break: break-word;
     }
-    .dlg-date {
-      font-size: 0.8em;
-      color: var(--secondary-text-color);
-    }
-    .dlg-body {
-      flex: 1;
-      overflow-y: auto;
-      padding: 16px 20px;
-    }
-    .dlg-loading {
-      text-align: center;
-      padding: 24px;
-      color: var(--secondary-text-color);
-    }
-    .dlg-content {
-      line-height: 1.6;
-      font-size: 0.95em;
-    }
-    .dlg-content p {
-      margin: 0 0 0.8em;
-    }
-    .dlg-content a {
-      color: var(--primary-color);
-    }
+    .dlg-date { font-size: 0.8em; color: var(--secondary-text-color); }
+    .dlg-body { flex: 1; overflow-y: auto; padding: 16px 20px; }
+    .dlg-loading { text-align: center; padding: 24px; color: var(--secondary-text-color); }
+    .dlg-content { line-height: 1.6; font-size: 0.95em; }
+    .dlg-content p { margin: 0 0 0.8em; }
+    .dlg-content a { color: var(--primary-color); }
     .dlg-footer {
       display: flex;
       justify-content: space-between;
@@ -379,11 +410,7 @@ export class LibrusMessagesCard extends LitElement {
       color: var(--secondary-text-color);
       font-size: 0.85em;
     }
-    .dlg-footer-actions {
-      display: flex;
-      gap: 8px;
-      margin-left: auto;
-    }
+    .dlg-footer-actions { display: flex; gap: 8px; margin-left: auto; }
     .btn-dismiss {
       background: var(--error-color);
       color: white;
@@ -408,37 +435,78 @@ export class LibrusMessagesCard extends LitElement {
     }
   `;
 
+  // ---------------------------------------------------------------------------
+  // Render
+  // ---------------------------------------------------------------------------
+
   render() {
     if (!this._config) return nothing;
-    const msgs = this._displayedMessages;
-    const title = this._config.title ?? "Wiadomości Librus";
-    const filterActive = this._onlyUnread || this._config.only_unread;
+    return this._filterActive ? this._renderFiltered() : this._renderVirtual();
+  }
+
+  private _renderHeader() {
+    const title = this._config?.title ?? "Wiadomości Librus";
+    return html`
+      <div class="card-header">
+        <span class="card-title">${title}</span>
+        <label class="filter-toggle">
+          <input
+            type="checkbox"
+            .checked=${this._onlyUnread}
+            @change=${(e: Event) => {
+              this._onlyUnread = (e.target as HTMLInputElement).checked;
+            }}
+          />
+          tylko nieprzeczytane
+        </label>
+      </div>
+    `;
+  }
+
+  // Tryb wirtualny — pełny virtual scroll dla niezafiltrowanej listy
+  private _renderVirtual() {
+    const startIdx = Math.max(0, Math.floor(this._scrollTop / ROW_HEIGHT) - BUFFER);
+    const endIdx = Math.min(
+      this._totalCount,
+      startIdx + this._visibleRows + BUFFER * 2,
+    );
+    const windowTop = startIdx * ROW_HEIGHT;
+    const spacerHeight = this._totalCount * ROW_HEIGHT;
 
     return html`
       <ha-card>
-        <div class="card-header">
-          <span class="card-title">${title}</span>
-          <label class="filter-toggle">
-            <input
-              type="checkbox"
-              .checked=${this._onlyUnread}
-              @change=${(e: Event) => {
-                this._onlyUnread = (e.target as HTMLInputElement).checked;
-              }}
-            />
-            tylko nieprzeczytane
-          </label>
+        ${this._renderHeader()}
+        <div
+          class="message-list"
+          style="height: ${this._listHeight}px"
+          @scroll=${this._onScroll}
+        >
+          <div class="virtual-spacer" style="height: ${spacerHeight}px">
+            <div class="virtual-window" style="top: ${windowTop}px">
+              ${Array.from({ length: endIdx - startIdx }, (_, i) => {
+                const msg = this._allMessages[startIdx + i];
+                return msg ? this._renderRow(msg) : this._renderSkeleton();
+              })}
+            </div>
+          </div>
         </div>
-        <div class="message-list">
-          ${msgs.length === 0 && !this._isLoadingMore
-            ? html`<div class="empty">
-                ${filterActive ? "Brak nieprzeczytanych wiadomości" : "Brak wiadomości"}
-              </div>`
-            : msgs.map((msg) => this._renderRow(msg))}
-          ${this._hasMore ? html`<div class="sentinel"></div>` : nothing}
-          ${this._isLoadingMore
-            ? html`<div class="loading-more">Ładowanie…</div>`
-            : nothing}
+      </ha-card>
+      ${this._renderDialog()}
+    `;
+  }
+
+  // Tryb filtrowany — flat lista, eager-loaded
+  private _renderFiltered() {
+    const loaded = this._allMessages.filter(
+      (m): m is HassMessage => m !== null && m.unread && !m.notification_dismissed,
+    );
+    return html`
+      <ha-card>
+        ${this._renderHeader()}
+        <div class="message-list" style="height: ${this._listHeight}px">
+          ${loaded.length === 0
+            ? html`<div class="empty">Brak nieprzeczytanych wiadomości</div>`
+            : loaded.map((msg) => this._renderRow(msg))}
         </div>
       </ha-card>
       ${this._renderDialog()}
@@ -464,6 +532,18 @@ export class LibrusMessagesCard extends LitElement {
           </div>
         </div>
         <span class="message-date">${msg.date}</span>
+      </div>
+    `;
+  }
+
+  private _renderSkeleton() {
+    return html`
+      <div class="message-item skeleton">
+        <div class="message-meta">
+          <div class="skel sender"></div>
+          <div class="skel title"></div>
+        </div>
+        <div class="skel date"></div>
       </div>
     `;
   }
@@ -511,7 +591,9 @@ export class LibrusMessagesCard extends LitElement {
                   Usuń powiadomienie
                 </button>`
               : nothing}
-            <button class="btn-close" @click=${() => this._dialog?.close()}>Zamknij</button>
+            <button class="btn-close" @click=${() => this._dialog?.close()}>
+              Zamknij
+            </button>
           </div>
         </div>
       </dialog>
