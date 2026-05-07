@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import random
+import re
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -708,16 +709,28 @@ class LibrusApiClient:
             if content is None:
                 raise ParseError("Error in parsing message content.")
 
-            # Rows 4+ may contain attachment links (td.left > a[href])
+            # Librus embeds attachment download URLs in onclick of <img> elements:
+            # otworz_w_nowym_oknie("\/wiadomosci\/pobierz_zalacznik\/MSG_ID\/ATTACH_ID", ...)
             attachments: list[dict[str, str]] = []
-            for tr in trs[3:]:
-                td = tr.select_one("td.left")
-                if td:
-                    for a in td.select("a[href]"):
-                        name = a.get_text(strip=True)
-                        url = a.get("href", "")
-                        if name and url:
-                            attachments.append({"name": name, "url": url})
+            seen_urls: set[str] = set()
+
+            for img in soup.select("img[onclick*='pobierz_zalacznik']"):
+                onclick = img.get("onclick", "")
+                m = re.search(r'"((?:\\/|/)[^"]+pobierz_zalacznik[^"]+)"', onclick)
+                if not m:
+                    continue
+                url = m.group(1).replace("\\/", "/")
+                if url in seen_urls:
+                    continue
+                seen_urls.add(url)
+                # Filename is in the sibling <td> (same <tr>, first cell)
+                tr = img.find_parent("tr")
+                name = ""
+                if tr:
+                    tds = tr.find_all("td")
+                    if tds:
+                        name = tds[0].get_text(strip=True)
+                attachments.append({"name": name, "url": url})
 
             return {
                 "author": unwrap_message_data(author_row),
