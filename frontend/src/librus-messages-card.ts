@@ -25,6 +25,7 @@ export class LibrusMessagesCard extends LitElement {
   @state() private _isLoadingMore = false;
   private _observer?: IntersectionObserver;
   private _sentinelEl?: Element;
+  @query(".message-list") private _listEl?: HTMLElement;
 
   static getStubConfig() {
     return { entity: "", entry_id: "", count: 10 };
@@ -42,14 +43,14 @@ export class LibrusMessagesCard extends LitElement {
 
   connectedCallback() {
     super.connectedCallback();
-    this._observer = new IntersectionObserver(
-      ([entry]) => {
-        if (entry.isIntersecting && !this._isLoadingMore && this._hasMore) {
-          void this._loadMore();
-        }
-      },
-      { rootMargin: "120px" },
-    );
+    // If reconnecting after disconnect (firstUpdated already ran), rebuild now.
+    if (this._listEl) this._createObserver();
+  }
+
+  firstUpdated() {
+    this._createObserver();
+    // Set list height CSS variable based on count config.
+    this._updateListHeight();
   }
 
   disconnectedCallback() {
@@ -59,8 +60,33 @@ export class LibrusMessagesCard extends LitElement {
     this._sentinelEl = undefined;
   }
 
+  private _createObserver() {
+    this._observer?.disconnect();
+    this._observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting && !this._isLoadingMore && this._hasMore) {
+          void this._loadMore();
+        }
+      },
+      { root: this._listEl, rootMargin: "60px" },
+    );
+    // Re-wire sentinel if already in DOM.
+    const sentinel = this.shadowRoot?.querySelector(".sentinel");
+    if (sentinel) {
+      this._sentinelEl = sentinel;
+      this._observer.observe(sentinel);
+    }
+  }
+
+  private _updateListHeight() {
+    const count = this._config?.count ?? 10;
+    this.style.setProperty("--ml-height", `${count * 52}px`);
+  }
+
   updated(changedProps: Map<string, unknown>) {
     super.updated(changedProps);
+
+    if (changedProps.has("_config")) this._updateListHeight();
 
     if (changedProps.has("hass") && this._loadedMessages.length === 0) {
       const initial = this._messagesFromSensor;
@@ -70,11 +96,15 @@ export class LibrusMessagesCard extends LitElement {
       }
     }
 
+    // Wire sentinel to observer whenever it appears/disappears in DOM.
     const sentinel = this.shadowRoot?.querySelector(".sentinel");
     if (sentinel && sentinel !== this._sentinelEl) {
       if (this._sentinelEl) this._observer?.unobserve(this._sentinelEl);
       this._sentinelEl = sentinel;
       this._observer?.observe(sentinel);
+    } else if (!sentinel && this._sentinelEl) {
+      this._observer?.unobserve(this._sentinelEl);
+      this._sentinelEl = undefined;
     }
   }
 
@@ -192,6 +222,11 @@ export class LibrusMessagesCard extends LitElement {
     }
     .message-list {
       padding: 0 8px 8px;
+      height: var(--ml-height, 520px);
+      overflow-y: auto;
+      overflow-x: hidden;
+      scrollbar-width: thin;
+      scrollbar-color: var(--scrollbar-thumb-color, var(--divider-color)) transparent;
     }
     .message-item {
       border-radius: 8px;
