@@ -191,6 +191,7 @@ export class LibrusGradesCard extends LitElement {
       flex: 1;
       overflow-y: auto;
       min-height: 0;
+      max-height: 480px;
     }
 
     .grade-row {
