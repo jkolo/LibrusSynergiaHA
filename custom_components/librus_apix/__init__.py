@@ -370,6 +370,12 @@ class LibrusApiClient:
                         # Akceptuj wartosc jesli po usunieciu +/- jest cyfra (1-6).
                         if grade_val and grade_val.replace("+", "").replace("-", "").isdigit():
                             desc = getattr(desc_grade, "desc", "")
+                            # Extract "Umiejętność: X" line — meaningful category for primary school.
+                            category = ""
+                            for line in desc.split("\n"):
+                                if line.startswith("Umiejętność:"):
+                                    category = line[len("Umiejętność:"):].strip()
+                                    break
                             all_grades.append({
                                 "subject": subject,
                                 "grade": desc_grade.grade,
@@ -377,7 +383,7 @@ class LibrusApiClient:
                                 "counts": False,       # Z definicji nie liczy się do średniej.
                                 "weight": 0,
                                 "date": desc_grade.date,
-                                "category": desc.split("\n")[0] if desc else "",
+                                "category": category,
                                 "description": desc,
                                 "title": getattr(desc_grade, "title", ""),
                                 "teacher": getattr(desc_grade, "teacher", ""),

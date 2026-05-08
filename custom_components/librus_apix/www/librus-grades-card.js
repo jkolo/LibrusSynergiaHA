@@ -645,7 +645,7 @@ function ne(i) {
 }
 function ae(i) {
   const e = i.toLowerCase();
-  return e.includes("sprawdzian") || e.includes("test") ? { label: "SPRAWDZ", cssClass: "type-test" } : e.includes("kartkówka") || e.includes("kartkowka") ? { label: "KARTK", cssClass: "type-quiz" } : e.includes("praca klasow") || e.includes("praca kontrolna") ? { label: "PR.KL", cssClass: "type-classwork" } : e.includes("praca domow") ? { label: "PR.DOM", cssClass: "type-homework" } : e.includes("wypracowanie") ? { label: "WYPRAC", cssClass: "type-essay" } : { label: e.slice(0, 6).toUpperCase() || "INNE", cssClass: "type-other" };
+  return e.includes("sprawdzian") || e.includes("test") ? { label: "SPRAWDZ", cssClass: "type-test" } : e.includes("kartkówka") || e.includes("kartkowka") ? { label: "KARTK", cssClass: "type-quiz" } : e.includes("praca klasow") || e.includes("praca kontrolna") ? { label: "PR.KL", cssClass: "type-classwork" } : e.includes("praca domow") ? { label: "PR.DOM", cssClass: "type-homework" } : e.includes("wypracowanie") ? { label: "WYPRAC", cssClass: "type-essay" } : { label: e.slice(0, 5).toUpperCase() || "INNE", cssClass: "type-other" };
 }
 let x = class extends k {
   constructor() {

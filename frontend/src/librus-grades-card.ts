@@ -31,7 +31,7 @@ function gradeTypeInfo(category: string): { label: string; cssClass: string } {
     return { label: "PR.DOM", cssClass: "type-homework" };
   if (cat.includes("wypracowanie"))
     return { label: "WYPRAC", cssClass: "type-essay" };
-  const truncated = cat.slice(0, 6).toUpperCase();
+  const truncated = cat.slice(0, 5).toUpperCase();
   return { label: truncated || "INNE", cssClass: "type-other" };
 }
 
