@@ -176,7 +176,7 @@ class LibrusAuthError(Exception):
 
 _DESCRIPTIVE_DESC_KEYS = (
     "Ocena", "Przedmiot", "Obszar oceniania", "Umiejętność",
-    "Data", "Nauczyciel", "Dodał",
+    "Data", "Nauczyciel", "Dodał", "Komentarz",
 )
 
 
@@ -188,6 +188,10 @@ def _parse_descriptive_desc(desc: str) -> dict[str, str]:
             if line.startswith(f"{key}:"):
                 result[key] = line[len(key) + 1:].strip()
                 break
+    # Komentarz może być wieloliniowy — wyciągnij pełną zawartość z oryginalnego stringa.
+    komm_idx = desc.find("\nKomentarz:")
+    if komm_idx != -1:
+        result["Komentarz"] = desc[komm_idx + len("\nKomentarz:"):].strip()
     return result
 
 
@@ -396,7 +400,7 @@ class LibrusApiClient:
                                 "weight": 0,
                                 "date": desc_grade.date,
                                 "category": parsed.get("Umiejętność", ""),
-                                "description": "",
+                                "description": parsed.get("Komentarz", ""),
                                 "title": parsed.get("Obszar oceniania", ""),
                                 "teacher": parsed.get("Nauczyciel", ""),
                                 "semester": desc_grade.semester,
