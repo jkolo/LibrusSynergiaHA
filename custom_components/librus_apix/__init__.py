@@ -752,6 +752,8 @@ class LibrusApiClient:
         def _work(client: Client) -> dict[str, Any]:
             import base64
             import os
+            import json
+            from urllib.parse import urlparse, parse_qs
             import librus_apix.urls as _urls
 
             full_url = (
@@ -759,7 +761,64 @@ class LibrusApiClient:
                 if attachment_url.startswith("/")
                 else attachment_url
             )
-            response = client.get(full_url)
+
+            # Przygotuj sesję z odpowiednimi cookies — Client.get() nie obsługuje kwargs
+            client.cookies.update(client.token.access_cookies())
+            session = client._session
+            session.headers = _urls.HEADERS
+            session.cookies = client.cookies
+
+            debug = {"url": full_url}
+
+            # Nie podążaj za przekierowaniami — Librus zwraca 302 do CSTryToDownload
+            response = session.get(full_url, proxies=client.proxy, allow_redirects=False)
+            debug["step1_status"] = response.status_code
+            debug["step1_ct"] = response.headers.get("Content-Type", "")
+            debug["step1_location"] = response.headers.get("Location", "")[:200]
+
+            if response.status_code in (301, 302, 303, 307, 308):
+                location = response.headers.get("Location", "")
+                debug["step"] = "redirect"
+
+                if "CSTryToDownload" in location or "singleUseKey" in location:
+                    parsed = urlparse(location)
+                    key = parse_qs(parsed.query).get("singleUseKey", [None])[0]
+                    debug["key_from_url"] = key
+
+                    if not key:
+                        r_html = session.get(location, proxies=client.proxy)
+                        m = re.search(r'singleUseKey\s*=\s*["\']([^"\']+)["\']', r_html.text)
+                        key = m.group(1) if m else None
+                        debug["key_from_html"] = key
+
+                    if key:
+                        # Krok 1: POST do CSCheckKey
+                        check_url = "https://sandbox.librus.pl/index.php?action=CSCheckKey"
+                        r_check = session.post(check_url, data={"singleUseKey": key}, proxies=client.proxy)
+                        debug["checkkey_status"] = r_check.status_code
+                        debug["checkkey_body"] = r_check.text[:100]
+
+                        # Krok 2: GET na CSDownload
+                        download_url = location.replace("CSTryToDownload", "CSDownload")
+                        debug["download_url"] = download_url[:200]
+                        response = session.get(download_url, proxies=client.proxy)
+                        debug["step2_status"] = response.status_code
+                        debug["step2_ct"] = response.headers.get("Content-Type", "")
+                    else:
+                        response = session.get(location, proxies=client.proxy)
+                        debug["step"] = "no_key_fallback"
+
+                elif "GetFile" in location:
+                    response = session.get(location.rstrip("/") + "/get", proxies=client.proxy)
+                    debug["step"] = "getfile"
+                else:
+                    response = session.get(location, proxies=client.proxy)
+                    debug["step"] = "plain_redirect"
+            else:
+                debug["step"] = "no_redirect_200"
+                if response.status_code != 200:
+                    response = session.get(full_url, proxies=client.proxy)
+
             content_type = (
                 response.headers.get("Content-Type", "application/octet-stream")
                 .split(";")[0]
@@ -771,10 +830,14 @@ class LibrusApiClient:
                 filename = cd.split("filename=")[-1].strip().strip("\"'")
             if not filename:
                 filename = os.path.basename(attachment_url.split("?")[0]) or "attachment"
+
+            _LOGGER.warning("ATTACH_DEBUG: %s", json.dumps(debug))
+
             return {
                 "filename": filename,
                 "content_type": content_type,
                 "data": base64.b64encode(response.content).decode("utf-8"),
+                "_debug": debug,
             }
 
         try:
