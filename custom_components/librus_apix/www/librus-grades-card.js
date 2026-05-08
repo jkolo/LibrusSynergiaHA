@@ -672,9 +672,9 @@ let x = class extends k {
     }
     return (this._config.only_recent ? i.filter((s) => s.is_recent) : i).sort((s, r) => oe(s.date) - oe(r.date));
   }
-  _openDialog(i) {
+  async _openDialog(i) {
     var e;
-    this._selectedGrade = i, (e = this._dialog) == null || e.showModal();
+    this._selectedGrade = i, await this.updateComplete, (e = this._dialog) == null || e.showModal();
   }
   _renderRow(i) {
     const { label: e, cssClass: t } = ae(i.category), s = [

@@ -71,8 +71,9 @@ export class LibrusGradesCard extends LitElement {
     return filtered.sort((a, b) => parseDateForSort(a.date) - parseDateForSort(b.date));
   }
 
-  private _openDialog(grade: HassGrade): void {
+  private async _openDialog(grade: HassGrade): Promise<void> {
     this._selectedGrade = grade;
+    await this.updateComplete;
     this._dialog?.showModal();
   }
 
