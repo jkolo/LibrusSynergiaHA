@@ -24,6 +24,27 @@ export interface MessageListResponse {
   total_count: number;
 }
 
+export interface HassGrade {
+  subject: string;
+  grade: string;
+  value: number | null;
+  counts: boolean;
+  weight: number;
+  date: string;
+  category: string;
+  description: string;
+  title: string;
+  teacher: string;
+  is_recent: boolean;
+}
+
+export interface LibrusGradesCardConfig {
+  type: string;
+  entities: string[];
+  title?: string;
+  only_recent?: boolean;
+}
+
 export interface HomeAssistant {
   states: Record<string, HassState>;
   callService(

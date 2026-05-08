@@ -13,8 +13,8 @@ from librus_apix.student_information import StudentInformation
 from custom_components.librus_apix._data_store import LibrusDataStore
 
 
-async def test_domain_setup_registers_frontend_card(hass: HomeAssistant) -> None:
-    """async_setup domenowy rejestruje static path i tworzy task zapisu do lovelace_resources."""
+async def test_domain_setup_registers_frontend_cards(hass: HomeAssistant) -> None:
+    """async_setup domenowy rejestruje static paths dla obu kart Lovelace."""
     import custom_components.librus_apix as librus_module
 
     mock_http = MagicMock()
@@ -31,11 +31,13 @@ async def test_domain_setup_registers_frontend_card(hass: HomeAssistant) -> None
     assert result is True
     mock_http.async_register_static_paths.assert_called_once()
     call_args = mock_http.async_register_static_paths.call_args[0][0]
-    assert len(call_args) == 1
-    assert call_args[0].url_path == "/librus_apix/librus-messages-card.js"
-    called_url: str = mock_ensure.call_args[0][1]
-    assert called_url.startswith("/librus_apix/librus-messages-card.js")
-    assert "?v=" in called_url
+    registered_paths = {p.url_path for p in call_args}
+    assert "/librus_apix/librus-messages-card.js" in registered_paths
+    assert "/librus_apix/librus-grades-card.js" in registered_paths
+    assert mock_ensure.call_count == 2
+    ensure_urls = {call[0][1] for call in mock_ensure.call_args_list}
+    assert any(u.startswith("/librus_apix/librus-messages-card.js") and "?v=" in u for u in ensure_urls)
+    assert any(u.startswith("/librus_apix/librus-grades-card.js") and "?v=" in u for u in ensure_urls)
 
 
 async def test_domain_setup_skips_registration_when_file_missing(hass: HomeAssistant) -> None:

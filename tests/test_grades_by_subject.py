@@ -105,20 +105,23 @@ async def test_subject_grades_sensor_attrs_include_grade_details(
     assert isinstance(details, list)
     assert len(details) == 2
     first = details[0]
-    # Pełen kontekst — wszystkie pola wzbogacone w PR 1 dostępne w atrybucie.
+    # Pełen kontekst — wszystkie pola dostępne w atrybucie, w tym subject (dla karty Lovelace).
     for key in (
-        "grade", "value", "date", "category", "description", "weight",
+        "subject", "grade", "value", "date", "category", "description", "weight",
         "counts", "teacher", "title", "is_recent",
     ):
         assert key in first, f"grade_details should expose {key}"
+    assert first["subject"] == "Matematyka"
     assert first["description"] == "Świetna praca, drobne błędy w zad. 4."
+    # Surowy słownik grades został usunięty z atrybutów (redundantny z grade_details).
+    assert "grades" not in attrs
 
 
-async def test_subject_average_sensor_attrs_include_grade_details(
+async def test_subject_average_sensor_attrs_compact(
     hass: HomeAssistant, fake_client_with_rich_grades, mock_entry_in_hass
 ):
-    """LibrusSubjectAverageSensor.extra_state_attributes ma grade_details
-    obok floata średniej (state)."""
+    """LibrusSubjectAverageSensor.extra_state_attributes ma tylko kompaktowe pola
+    (subject, grade_list, grade_count) — bez grade_details (16KB limit HA)."""
     coordinator = LibrusDataUpdateCoordinator(
         hass, fake_client_with_rich_grades, config_entry=mock_entry_in_hass
     )
@@ -127,8 +130,9 @@ async def test_subject_average_sensor_attrs_include_grade_details(
 
     sensor = LibrusSubjectAverageSensor(coordinator, "Matematyka", mock_entry_in_hass)
     attrs = sensor.extra_state_attributes
-    assert "grade_details" in attrs
-    assert len(attrs["grade_details"]) == 2
-    assert attrs["grade_details"][0]["weight"] == 3
+    assert "grade_details" not in attrs
+    assert attrs["subject"] == "Matematyka"
+    assert "grade_list" in attrs
+    assert attrs["grade_count"] == 2
     # State pozostaje floatem (średnia).
     assert isinstance(sensor.native_value, float)

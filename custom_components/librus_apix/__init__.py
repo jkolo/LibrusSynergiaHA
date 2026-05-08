@@ -59,7 +59,8 @@ _LOGGER = logging.getLogger(__name__)
 
 PLATFORMS = ["sensor", "calendar", "event"]
 
-_CARD_PATH = "/librus_apix/librus-messages-card.js"
+_MESSAGES_CARD_PATH = "/librus_apix/librus-messages-card.js"
+_GRADES_CARD_PATH = "/librus_apix/librus-grades-card.js"
 
 # Odczyt manifestu przy załadowaniu modułu (poza event loop) — cache bust dla karty Lovelace.
 try:
@@ -71,20 +72,28 @@ except Exception:  # noqa: BLE001
     _CARD_VERSION = ""
 
 
-def _card_url_with_version() -> str:
+def _card_url(path: str) -> str:
     """Zwróć URL karty z ?v= z manifest.json — bust cache przy update."""
-    return f"{_CARD_PATH}?v={_CARD_VERSION}" if _CARD_VERSION else _CARD_PATH
+    return f"{path}?v={_CARD_VERSION}" if _CARD_VERSION else path
 
 
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
-    """Zarejestruj kartę Lovelace jako statyczny zasób HA."""
-    card_path = Path(__file__).parent / "www" / "librus-messages-card.js"
-    if card_path.exists() and hass.http is not None:
-        await hass.http.async_register_static_paths([
-            StaticPathConfig(_CARD_PATH, str(card_path), cache_headers=False),
-        ])
-        hass.async_create_task(_async_ensure_lovelace_resource(hass, _card_url_with_version()))
-        _LOGGER.debug("Librus messages card static path registered at %s", _CARD_PATH)
+    """Zarejestruj karty Lovelace jako statyczne zasoby HA."""
+    www_dir = Path(__file__).parent / "www"
+    if hass.http is None:
+        return True
+    static_paths: list[StaticPathConfig] = []
+    messages_js = www_dir / "librus-messages-card.js"
+    if messages_js.exists():
+        static_paths.append(StaticPathConfig(_MESSAGES_CARD_PATH, str(messages_js), cache_headers=False))
+        hass.async_create_task(_async_ensure_lovelace_resource(hass, _card_url(_MESSAGES_CARD_PATH)))
+    grades_js = www_dir / "librus-grades-card.js"
+    if grades_js.exists():
+        static_paths.append(StaticPathConfig(_GRADES_CARD_PATH, str(grades_js), cache_headers=False))
+        hass.async_create_task(_async_ensure_lovelace_resource(hass, _card_url(_GRADES_CARD_PATH)))
+    if static_paths:
+        await hass.http.async_register_static_paths(static_paths)
+        _LOGGER.debug("Librus Lovelace cards registered: %s", [p.url_path for p in static_paths])
     return True
 
 

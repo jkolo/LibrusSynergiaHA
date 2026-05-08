@@ -584,6 +584,7 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 if subject not in grades_by_subject:
                     grades_by_subject[subject] = []
                 grades_by_subject[subject].append({
+                    "subject": subject,
                     "grade": grade["grade"],
                     "value": grade.get("value"),
                     "counts": grade.get("counts"),
