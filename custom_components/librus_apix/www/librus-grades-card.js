@@ -662,9 +662,6 @@ let w = class extends k {
   getCardSize() {
     return 6;
   }
-  getGridOptions() {
-    return { columns: 6, rows: 6, min_columns: 3, min_rows: 2 };
-  }
   get _grades() {
     var t;
     if (!this.hass || !this._config) return [];
@@ -753,8 +750,14 @@ let w = class extends k {
   }
 };
 w.styles = _e`
-    :host { display: block; }
-    ha-card { padding: 0; overflow: hidden; }
+    :host { display: block; height: 100%; }
+    ha-card {
+      padding: 0;
+      overflow: hidden;
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+    }
 
     .card-header {
       display: flex;
@@ -783,8 +786,9 @@ w.styles = _e`
     }
 
     .grade-list {
+      flex: 1;
       overflow-y: auto;
-      max-height: 480px;
+      min-height: 0;
     }
 
     .grade-row {

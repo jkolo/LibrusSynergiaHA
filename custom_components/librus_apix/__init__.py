@@ -174,6 +174,23 @@ class LibrusAuthError(Exception):
     """
 
 
+_DESCRIPTIVE_DESC_KEYS = (
+    "Ocena", "Przedmiot", "Obszar oceniania", "Umiejętność",
+    "Data", "Nauczyciel", "Dodał",
+)
+
+
+def _parse_descriptive_desc(desc: str) -> dict[str, str]:
+    result: dict[str, str] = {}
+    for line in desc.split("\n"):
+        line = line.strip()
+        for key in _DESCRIPTIVE_DESC_KEYS:
+            if line.startswith(f"{key}:"):
+                result[key] = line[len(key) + 1:].strip()
+                break
+    return result
+
+
 def _current_semester() -> int:
     """Return current Polish school-year semester (1 or 2).
 
@@ -369,24 +386,19 @@ class LibrusApiClient:
                         grade_val = desc_grade.grade.strip()
                         # Akceptuj wartosc jesli po usunieciu +/- jest cyfra (1-6).
                         if grade_val and grade_val.replace("+", "").replace("-", "").isdigit():
-                            desc = getattr(desc_grade, "desc", "")
-                            # Extract "Umiejętność: X" line — meaningful category for primary school.
-                            category = ""
-                            for line in desc.split("\n"):
-                                if line.startswith("Umiejętność:"):
-                                    category = line[len("Umiejętność:"):].strip()
-                                    break
+                            desc = getattr(desc_grade, "desc", "") or ""
+                            parsed = _parse_descriptive_desc(desc)
                             all_grades.append({
                                 "subject": subject,
                                 "grade": desc_grade.grade,
-                                "value": None,         # Descriptive: brak property value.
-                                "counts": False,       # Z definicji nie liczy się do średniej.
+                                "value": None,
+                                "counts": False,
                                 "weight": 0,
                                 "date": desc_grade.date,
-                                "category": category,
-                                "description": desc,
-                                "title": getattr(desc_grade, "title", ""),
-                                "teacher": getattr(desc_grade, "teacher", ""),
+                                "category": parsed.get("Umiejętność", ""),
+                                "description": "",
+                                "title": parsed.get("Obszar oceniania", ""),
+                                "teacher": parsed.get("Nauczyciel", ""),
                                 "semester": desc_grade.semester,
                                 "type": "descriptive",
                             })

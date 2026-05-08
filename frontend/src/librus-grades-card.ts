@@ -59,10 +59,6 @@ export class LibrusGradesCard extends LitElement {
     return 6;
   }
 
-  getGridOptions() {
-    return { columns: 6, rows: 6, min_columns: 3, min_rows: 2 };
-  }
-
   private get _grades(): HassGrade[] {
     if (!this.hass || !this._config) return [];
     const all: HassGrade[] = [];
@@ -156,8 +152,14 @@ export class LibrusGradesCard extends LitElement {
   }
 
   static styles = css`
-    :host { display: block; }
-    ha-card { padding: 0; overflow: hidden; }
+    :host { display: block; height: 100%; }
+    ha-card {
+      padding: 0;
+      overflow: hidden;
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+    }
 
     .card-header {
       display: flex;
@@ -186,8 +188,9 @@ export class LibrusGradesCard extends LitElement {
     }
 
     .grade-list {
+      flex: 1;
       overflow-y: auto;
-      max-height: 480px;
+      min-height: 0;
     }
 
     .grade-row {
