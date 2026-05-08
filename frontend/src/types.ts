@@ -44,6 +44,7 @@ export interface LibrusGradesCardConfig {
   title?: string;
   only_recent?: boolean;
   sort_order?: "asc" | "desc";
+  height?: number;
 }
 
 export interface HomeAssistant {

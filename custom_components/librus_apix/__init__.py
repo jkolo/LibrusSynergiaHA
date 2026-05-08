@@ -403,7 +403,7 @@ class LibrusApiClient:
                                 "date": desc_grade.date,
                                 "category": parsed.get("Umiejętność", ""),
                                 "description": "",
-                                "title": parsed.get("Obszar oceniania", ""),
+                                "title": parsed.get("Komentarz", ""),
                                 "teacher": parsed.get("Nauczyciel", ""),
                                 "semester": desc_grade.semester,
                                 "type": "descriptive",

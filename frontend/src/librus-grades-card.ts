@@ -1,5 +1,5 @@
 import { LitElement, html, css, nothing } from "lit";
-import { customElement, property, query, state } from "lit/decorators.js";
+import { customElement, property, state } from "lit/decorators.js";
 import type { HassGrade, HomeAssistant, LibrusGradesCardConfig } from "./types.js";
 
 function parseDateForSort(dateStr: string): number {
@@ -41,8 +41,24 @@ export class LibrusGradesCard extends LitElement {
 
   @state() private _config?: LibrusGradesCardConfig;
   @state() private _selectedGrade: HassGrade | null = null;
+  @state() private _dlgOpen = false;
 
-  @query("dialog") private _dialog?: HTMLDialogElement;
+  private _onKeydown = (e: KeyboardEvent) => {
+    if (e.key === "Escape" && this._dlgOpen) {
+      e.stopPropagation();
+      this._closeDialog();
+    }
+  };
+
+  connectedCallback() {
+    super.connectedCallback();
+    window.addEventListener("keydown", this._onKeydown);
+  }
+
+  disconnectedCallback() {
+    super.disconnectedCallback();
+    window.removeEventListener("keydown", this._onKeydown);
+  }
 
   static getStubConfig(): LibrusGradesCardConfig {
     return { type: "librus-grades-card", entities: [], title: "Oceny" };
@@ -74,7 +90,12 @@ export class LibrusGradesCard extends LitElement {
 
   private _openDialog(grade: HassGrade): void {
     this._selectedGrade = grade;
-    this._dialog?.showModal();
+    this._dlgOpen = true;
+  }
+
+  private _closeDialog(): void {
+    this._dlgOpen = false;
+    this._selectedGrade = null;
   }
 
   private _renderRow(grade: HassGrade) {
@@ -103,31 +124,37 @@ export class LibrusGradesCard extends LitElement {
   private _renderDialog() {
     const g = this._selectedGrade;
     return html`
-      <dialog @close="${() => { this._selectedGrade = null; }}">
-        ${g ? html`
-          <div class="dlg-header">
-            <div class="dlg-meta">
-              <div class="dlg-subject">${g.subject}</div>
-              <div class="dlg-category">${g.category || "—"}${g.category && g.date ? " · " : ""}${formatDate(g.date)}</div>
+      <div
+        class="dlg-overlay${this._dlgOpen ? " dlg-overlay--open" : ""}"
+        @click="${(e: Event) => { if (e.target === e.currentTarget) this._closeDialog(); }}"
+        aria-hidden="${String(!this._dlgOpen)}"
+      >
+        <div class="dlg-panel" role="dialog" aria-modal="true">
+          ${g ? html`
+            <div class="dlg-header">
+              <div class="dlg-meta">
+                <div class="dlg-subject">${g.subject}</div>
+                <div class="dlg-category">${g.category || "—"}${g.category && g.date ? " · " : ""}${formatDate(g.date)}</div>
+              </div>
+              <ha-icon-button
+                .label=${"Zamknij"}
+                .path=${"M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"}
+                @click="${() => this._closeDialog()}"
+              ></ha-icon-button>
             </div>
-            <ha-icon-button
-              .label=${"Zamknij"}
-              .path=${"M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"}
-              @click="${() => this._dialog?.close()}"
-            ></ha-icon-button>
-          </div>
-          <div class="dlg-body">
-            <div class="dlg-grade-large ${gradeTypeInfo(g.category).cssClass}">${g.grade}</div>
-            <div class="dlg-details">
-              ${g.teacher ? html`<div class="dlg-detail-row"><span class="dlg-detail-label">Nauczyciel</span><span>${g.teacher}</span></div>` : nothing}
-              ${g.weight != null ? html`<div class="dlg-detail-row"><span class="dlg-detail-label">Waga</span><span>${g.weight}</span></div>` : nothing}
-              <div class="dlg-detail-row"><span class="dlg-detail-label">Liczy do średniej</span><span>${g.counts ? "Tak" : "Nie"}</span></div>
-              ${g.title ? html`<div class="dlg-detail-row"><span class="dlg-detail-label">Temat</span><span>${g.title}</span></div>` : nothing}
-              ${g.description ? html`<div class="dlg-detail-row"><span class="dlg-detail-label">Poprawa</span><span>${g.description}</span></div>` : nothing}
+            <div class="dlg-body">
+              <div class="dlg-grade-large ${gradeTypeInfo(g.category).cssClass}">${g.grade}</div>
+              <div class="dlg-details">
+                ${g.teacher ? html`<div class="dlg-detail-row"><span class="dlg-detail-label">Nauczyciel</span><span>${g.teacher}</span></div>` : nothing}
+                ${g.weight != null ? html`<div class="dlg-detail-row"><span class="dlg-detail-label">Waga</span><span>${g.weight}</span></div>` : nothing}
+                <div class="dlg-detail-row"><span class="dlg-detail-label">Liczy do średniej</span><span>${g.counts ? "Tak" : "Nie"}</span></div>
+                ${g.title ? html`<div class="dlg-detail-row dlg-detail-row--block"><span class="dlg-detail-label">Temat</span><span class="dlg-detail-text">${g.title}</span></div>` : nothing}
+                ${g.description ? html`<div class="dlg-detail-row"><span class="dlg-detail-label">Poprawa</span><span>${g.description}</span></div>` : nothing}
+              </div>
             </div>
-          </div>
-        ` : nothing}
-      </dialog>
+          ` : nothing}
+        </div>
+      </div>
     `;
   }
 
@@ -136,8 +163,9 @@ export class LibrusGradesCard extends LitElement {
     const grades = this._grades;
     const title = this._config.title ?? "Oceny";
     const newCount = grades.filter(g => g.is_recent).length;
+    const h = this._config.height ?? 400;
     return html`
-      <ha-card>
+      <ha-card style="--card-h:${h}px">
         <div class="card-header">
           <span class="card-title">${title}</span>
           <span class="card-count">${grades.length}${newCount > 0 ? html` <span class="new-badge">${newCount} nowe</span>` : nothing}</span>
@@ -153,11 +181,12 @@ export class LibrusGradesCard extends LitElement {
   }
 
   static styles = css`
-    :host { display: block; height: 100%; }
+    :host { display: block; }
+
     ha-card {
       padding: 0;
       overflow: hidden;
-      height: 100%;
+      height: var(--card-h, 400px);
       display: flex;
       flex-direction: column;
     }
@@ -167,6 +196,7 @@ export class LibrusGradesCard extends LitElement {
       justify-content: space-between;
       align-items: center;
       padding: 12px 16px 8px;
+      flex-shrink: 0;
     }
     .card-title {
       font-size: 1.1em;
@@ -192,7 +222,6 @@ export class LibrusGradesCard extends LitElement {
       flex: 1;
       overflow-y: auto;
       min-height: 0;
-      max-height: 480px;
     }
 
     .grade-row {
@@ -283,23 +312,31 @@ export class LibrusGradesCard extends LitElement {
       font-size: 0.9em;
     }
 
-    /* Dialog */
-    dialog[open] {
+    /* Overlay — position:fixed nie blokuje scroll body (w odróżnieniu od showModal) */
+    .dlg-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      z-index: 9999;
+      background: rgba(0, 0, 0, 0.45);
+      backdrop-filter: blur(2px);
+      align-items: center;
+      justify-content: center;
+    }
+    .dlg-overlay--open {
+      display: flex;
+    }
+
+    .dlg-panel {
       max-width: min(480px, 95vw);
       max-height: 80vh;
-      border: none;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
       border-radius: var(--ha-card-border-radius, 12px);
       box-shadow: var(--ha-card-box-shadow, 0 4px 16px rgba(0, 0, 0, 0.4));
       background: var(--card-background-color, #fff);
       color: var(--primary-text-color);
-      padding: 0;
-      overflow: hidden;
-      display: flex;
-      flex-direction: column;
-    }
-    dialog::backdrop {
-      background: rgba(0, 0, 0, 0.45);
-      backdrop-filter: blur(2px);
     }
 
     .dlg-header {
@@ -351,19 +388,20 @@ export class LibrusGradesCard extends LitElement {
       gap: 12px;
       font-size: 0.9em;
     }
-    .dlg-description {
+    .dlg-detail-row--block {
       align-items: flex-start;
-    }
-    .dlg-description span:last-child {
-      text-align: right;
-      flex-shrink: 1;
     }
     .dlg-detail-label {
       color: var(--secondary-text-color);
       white-space: nowrap;
       flex-shrink: 0;
     }
-
+    .dlg-detail-text {
+      text-align: right;
+      word-break: break-word;
+      white-space: pre-wrap;
+      flex-shrink: 1;
+    }
   `;
 }
 
