@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "build": "vite build && vite build --config vite.grades.config.ts",
+    "build": "vite build && vite build --config vite.grades.config.ts && vite build --config vite.subject-grades.config.ts",
     "watch": "vite build --watch",
     "test": "vitest run"
   },

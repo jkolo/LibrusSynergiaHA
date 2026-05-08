@@ -34,10 +34,12 @@ async def test_domain_setup_registers_frontend_cards(hass: HomeAssistant) -> Non
     registered_paths = {p.url_path for p in call_args}
     assert "/librus_apix/librus-messages-card.js" in registered_paths
     assert "/librus_apix/librus-grades-card.js" in registered_paths
-    assert mock_ensure.call_count == 2
+    assert "/librus_apix/librus-subject-grades-card.js" in registered_paths
+    assert mock_ensure.call_count == 3
     ensure_urls = {call[0][1] for call in mock_ensure.call_args_list}
     assert any(u.startswith("/librus_apix/librus-messages-card.js") and "?v=" in u for u in ensure_urls)
     assert any(u.startswith("/librus_apix/librus-grades-card.js") and "?v=" in u for u in ensure_urls)
+    assert any(u.startswith("/librus_apix/librus-subject-grades-card.js") and "?v=" in u for u in ensure_urls)
 
 
 async def test_domain_setup_skips_registration_when_file_missing(hass: HomeAssistant) -> None:
