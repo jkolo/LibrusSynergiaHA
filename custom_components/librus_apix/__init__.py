@@ -777,6 +777,7 @@ class LibrusApiClient:
             debug["step1_location"] = response.headers.get("Location", "")[:200]
 
             if response.status_code in (301, 302, 303, 307, 308):
+                import time as _time
                 location = response.headers.get("Location", "")
                 debug["step"] = "redirect"
 
@@ -785,27 +786,39 @@ class LibrusApiClient:
                     key = parse_qs(parsed.query).get("singleUseKey", [None])[0]
                     debug["key_from_url"] = key
 
+                    # Krok 1: GET CSTryToDownload — inicjuje pobieranie po stronie serwera
+                    r_try = session.get(location, proxies=client.proxy)
+                    debug["try_status"] = r_try.status_code
+
                     if not key:
-                        r_html = session.get(location, proxies=client.proxy)
-                        m = re.search(r'singleUseKey\s*=\s*["\']([^"\']+)["\']', r_html.text)
+                        m = re.search(r'singleUseKey\s*=\s*["\']([^"\']+)["\']', r_try.text)
                         key = m.group(1) if m else None
                         debug["key_from_html"] = key
 
                     if key:
-                        # Krok 1: POST do CSCheckKey
+                        # Krok 2: Poll CSCheckKey do "ready" (max 10 prób, 0.5s przerwa)
                         check_url = "https://sandbox.librus.pl/index.php?action=CSCheckKey"
-                        r_check = session.post(check_url, data={"singleUseKey": key}, proxies=client.proxy)
-                        debug["checkkey_status"] = r_check.status_code
-                        debug["checkkey_body"] = r_check.text[:100]
+                        check_status = "unknown"
+                        for attempt in range(10):
+                            r_check = session.post(check_url, data={"singleUseKey": key}, proxies=client.proxy)
+                            try:
+                                check_status = r_check.json().get("status", "?")
+                            except Exception:
+                                check_status = r_check.text[:50]
+                            if check_status == "ready":
+                                break
+                            _time.sleep(0.5)
+                        debug["checkkey_status"] = check_status
+                        debug["checkkey_attempts"] = attempt + 1
 
-                        # Krok 2: GET na CSDownload
+                        # Krok 3: GET CSDownload
                         download_url = location.replace("CSTryToDownload", "CSDownload")
                         debug["download_url"] = download_url[:200]
                         response = session.get(download_url, proxies=client.proxy)
                         debug["step2_status"] = response.status_code
                         debug["step2_ct"] = response.headers.get("Content-Type", "")
                     else:
-                        response = session.get(location, proxies=client.proxy)
+                        response = r_try
                         debug["step"] = "no_key_fallback"
 
                 elif "GetFile" in location:
