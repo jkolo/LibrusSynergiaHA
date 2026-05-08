@@ -752,7 +752,7 @@ class LibrusApiClient:
         def _work(client: Client) -> dict[str, Any]:
             import base64
             import os
-            import json
+            import time as _time
             from urllib.parse import urlparse, parse_qs
             import librus_apix.urls as _urls
 
@@ -768,67 +768,46 @@ class LibrusApiClient:
             session.headers = _urls.HEADERS
             session.cookies = client.cookies
 
-            debug = {"url": full_url}
-
-            # Nie podążaj za przekierowaniami — Librus zwraca 302 do CSTryToDownload
+            # allow_redirects=False — Librus zwraca 302 do CSTryToDownload
             response = session.get(full_url, proxies=client.proxy, allow_redirects=False)
-            debug["step1_status"] = response.status_code
-            debug["step1_ct"] = response.headers.get("Content-Type", "")
-            debug["step1_location"] = response.headers.get("Location", "")[:200]
 
             if response.status_code in (301, 302, 303, 307, 308):
-                import time as _time
                 location = response.headers.get("Location", "")
-                debug["step"] = "redirect"
 
                 if "CSTryToDownload" in location or "singleUseKey" in location:
                     parsed = urlparse(location)
                     key = parse_qs(parsed.query).get("singleUseKey", [None])[0]
-                    debug["key_from_url"] = key
 
                     # Krok 1: GET CSTryToDownload — inicjuje pobieranie po stronie serwera
                     r_try = session.get(location, proxies=client.proxy)
-                    debug["try_status"] = r_try.status_code
 
                     if not key:
                         m = re.search(r'singleUseKey\s*=\s*["\']([^"\']+)["\']', r_try.text)
                         key = m.group(1) if m else None
-                        debug["key_from_html"] = key
 
                     if key:
                         # Krok 2: Poll CSCheckKey do "ready" (max 10 prób, 0.5s przerwa)
                         check_url = "https://sandbox.librus.pl/index.php?action=CSCheckKey"
-                        check_status = "unknown"
-                        for attempt in range(10):
+                        for _ in range(10):
                             r_check = session.post(check_url, data={"singleUseKey": key}, proxies=client.proxy)
                             try:
-                                check_status = r_check.json().get("status", "?")
+                                if r_check.json().get("status") == "ready":
+                                    break
                             except Exception:
-                                check_status = r_check.text[:50]
-                            if check_status == "ready":
-                                break
+                                pass
                             _time.sleep(0.5)
-                        debug["checkkey_status"] = check_status
-                        debug["checkkey_attempts"] = attempt + 1
 
                         # Krok 3: GET CSDownload
                         download_url = location.replace("CSTryToDownload", "CSDownload")
-                        debug["download_url"] = download_url[:200]
                         response = session.get(download_url, proxies=client.proxy)
-                        debug["step2_status"] = response.status_code
-                        debug["step2_ct"] = response.headers.get("Content-Type", "")
                     else:
                         response = r_try
-                        debug["step"] = "no_key_fallback"
 
                 elif "GetFile" in location:
                     response = session.get(location.rstrip("/") + "/get", proxies=client.proxy)
-                    debug["step"] = "getfile"
                 else:
                     response = session.get(location, proxies=client.proxy)
-                    debug["step"] = "plain_redirect"
             else:
-                debug["step"] = "no_redirect_200"
                 if response.status_code != 200:
                     response = session.get(full_url, proxies=client.proxy)
 
@@ -840,17 +819,20 @@ class LibrusApiClient:
             cd = response.headers.get("Content-Disposition", "")
             filename = ""
             if "filename=" in cd:
-                filename = cd.split("filename=")[-1].strip().strip("\"'")
+                raw = cd.split("filename=")[-1].strip().strip("\"'")
+                try:
+                    filename = raw.encode("latin-1").decode("utf-8")
+                except (UnicodeDecodeError, UnicodeEncodeError):
+                    filename = raw
             if not filename:
                 filename = os.path.basename(attachment_url.split("?")[0]) or "attachment"
 
-            _LOGGER.warning("ATTACH_DEBUG: %s", json.dumps(debug))
+            _LOGGER.debug("Pobrano załącznik %s (%s, %d B)", filename, content_type, len(response.content))
 
             return {
                 "filename": filename,
                 "content_type": content_type,
                 "data": base64.b64encode(response.content).decode("utf-8"),
-                "_debug": debug,
             }
 
         try:

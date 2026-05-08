@@ -32,6 +32,12 @@ export class LibrusMessagesCard extends LitElement {
   @state() private _dialogLoading = false;
   @query("dialog") private _dialog?: HTMLDialogElement;
 
+  // Podgląd załącznika inline
+  @state() private _previewBlobUrl: string | null = null;
+  @state() private _previewContentType: string | null = null;
+  @state() private _previewFilename: string | null = null;
+  @state() private _previewLoadingUrl: string | null = null;
+
   static getStubConfig() {
     return { entity: "", entry_id: "", count: 10 };
   }
@@ -221,8 +227,24 @@ export class LibrusMessagesCard extends LitElement {
     this._selectedMsg = updated;
   }
 
+  private _isBrowserPreviewable(contentType: string): boolean {
+    return (
+      contentType === "application/pdf" ||
+      contentType.startsWith("image/") ||
+      contentType.startsWith("video/") ||
+      contentType.startsWith("audio/")
+    );
+  }
+
   private async _downloadAttachment(name: string, url: string) {
     if (!this.hass || !this._config) return;
+    if (this._previewBlobUrl) {
+      URL.revokeObjectURL(this._previewBlobUrl);
+      this._previewBlobUrl = null;
+      this._previewContentType = null;
+      this._previewFilename = null;
+    }
+    this._previewLoadingUrl = url;
     try {
       const result = await this.hass.callService(
         "librus_apix",
@@ -239,13 +261,23 @@ export class LibrusMessagesCard extends LitElement {
       const bytes = new Uint8Array(binary.length);
       for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
       const blob = new Blob([bytes], { type: data.content_type });
-      const link = document.createElement("a");
-      link.href = URL.createObjectURL(blob);
-      link.download = data.filename || name;
-      link.click();
-      URL.revokeObjectURL(link.href);
+      const blobUrl = URL.createObjectURL(blob);
+
+      if (this._isBrowserPreviewable(data.content_type)) {
+        this._previewBlobUrl = blobUrl;
+        this._previewContentType = data.content_type;
+        this._previewFilename = data.filename || name;
+      } else {
+        const link = document.createElement("a");
+        link.href = blobUrl;
+        link.download = data.filename || name;
+        link.click();
+        URL.revokeObjectURL(blobUrl);
+      }
     } catch {
       // Błąd pobierania — nic nie rób (HA wyświetla własny alert)
+    } finally {
+      this._previewLoadingUrl = null;
     }
   }
 
@@ -483,6 +515,52 @@ export class LibrusMessagesCard extends LitElement {
     .btn-attachment:hover {
       background: color-mix(in srgb, var(--primary-color) 18%, transparent);
     }
+    .btn-attachment:disabled { opacity: 0.6; cursor: default; }
+    .btn-attachment.loading ha-icon { animation: spin 1s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* Podgląd inline załącznika */
+    .dlg-preview {
+      border-top: 1px solid var(--divider-color);
+      padding: 12px 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      flex-shrink: 0;
+      max-height: 55vh;
+    }
+    .preview-iframe {
+      width: 100%;
+      flex: 1;
+      min-height: 300px;
+      border: none;
+      border-radius: 4px;
+      background: var(--secondary-background-color);
+    }
+    .preview-img {
+      max-width: 100%;
+      max-height: 45vh;
+      object-fit: contain;
+      border-radius: 4px;
+      display: block;
+      margin: 0 auto;
+    }
+    .preview-video, .preview-audio {
+      width: 100%;
+      border-radius: 4px;
+    }
+    .btn-download-preview {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 6px 14px;
+      background: var(--primary-color);
+      color: var(--text-primary-color, white);
+      border-radius: 4px;
+      text-decoration: none;
+      font-size: 0.85em;
+      align-self: flex-end;
+    }
     .dlg-footer-actions { display: flex; gap: 8px; margin-left: auto; }
     .btn-dismiss {
       background: var(--error-color);
@@ -637,6 +715,12 @@ export class LibrusMessagesCard extends LitElement {
         @close=${() => {
           this._selectedMsg = null;
           this._dialogContent = null;
+          if (this._previewBlobUrl) {
+            URL.revokeObjectURL(this._previewBlobUrl);
+            this._previewBlobUrl = null;
+            this._previewContentType = null;
+            this._previewFilename = null;
+          }
         }}
       >
         <div class="dlg-header">
@@ -669,14 +753,50 @@ export class LibrusMessagesCard extends LitElement {
               ${this._dialogContent.attachments.map(
                 (a) => html`
                   <button
-                    class="btn-attachment"
+                    class="btn-attachment ${this._previewLoadingUrl === a.url ? "loading" : ""}"
+                    ?disabled=${this._previewLoadingUrl !== null}
                     @click=${() => this._downloadAttachment(a.name, a.url)}
                   >
-                    <ha-icon icon="mdi:download"></ha-icon>
+                    <ha-icon icon="${this._previewLoadingUrl === a.url ? "mdi:loading" : "mdi:download"}"></ha-icon>
                     ${a.name}
                   </button>
                 `,
               )}
+            </div>`
+          : nothing}
+        ${this._previewBlobUrl && this._previewContentType
+          ? html`<div class="dlg-preview">
+              ${this._previewContentType === "application/pdf"
+                ? html`<iframe
+                    src="${this._previewBlobUrl}"
+                    class="preview-iframe"
+                    title="${this._previewFilename ?? ""}"
+                  ></iframe>`
+                : this._previewContentType.startsWith("image/")
+                  ? html`<img
+                      src="${this._previewBlobUrl}"
+                      class="preview-img"
+                      alt="${this._previewFilename ?? ""}"
+                    />`
+                  : this._previewContentType.startsWith("video/")
+                    ? html`<video
+                        src="${this._previewBlobUrl}"
+                        class="preview-video"
+                        controls
+                      ></video>`
+                    : html`<audio
+                        src="${this._previewBlobUrl}"
+                        class="preview-audio"
+                        controls
+                      ></audio>`}
+              <a
+                href="${this._previewBlobUrl}"
+                download="${this._previewFilename ?? "plik"}"
+                class="btn-download-preview"
+              >
+                <ha-icon icon="mdi:download"></ha-icon>
+                Pobierz
+              </a>
             </div>`
           : nothing}
         <div class="dlg-footer">
