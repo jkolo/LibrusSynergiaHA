@@ -34,6 +34,7 @@ export interface HassGrade {
   category: string;
   description: string;
   title: string;
+  comment: string;
   teacher: string;
   is_recent: boolean;
 }

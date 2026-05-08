@@ -398,6 +398,7 @@ def _grade_details_view(grades: list[dict[str, Any]]) -> list[dict[str, Any]]:
             "counts": g.get("counts"),
             "teacher": g.get("teacher", ""),
             "title": g.get("title", ""),
+            "comment": g.get("comment", ""),
             "is_recent": bool(g.get("is_recent", False)),
         }
         for g in grades

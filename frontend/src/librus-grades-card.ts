@@ -121,6 +121,7 @@ export class LibrusGradesCard extends LitElement {
             <div class="dlg-detail-row"><span class="dlg-detail-label">Liczy do średniej</span><span>${g.counts ? "Tak" : "Nie"}</span></div>
             ${g.title ? html`<div class="dlg-detail-row dlg-detail-row--block"><span class="dlg-detail-label">Temat</span><span class="dlg-detail-text">${g.title}</span></div>` : nothing}
             ${g.description ? html`<div class="dlg-detail-row"><span class="dlg-detail-label">Poprawa</span><span>${g.description}</span></div>` : nothing}
+            ${g.comment ? html`<div class="dlg-detail-row dlg-detail-row--block"><span class="dlg-detail-label">Komentarz</span><span class="dlg-detail-text">${g.comment}</span></div>` : nothing}
           </div>
         ` : nothing}
       </ha-dialog>

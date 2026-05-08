@@ -29,7 +29,7 @@ const $t = (i) => new dt(typeof i == "string" ? i : i + "", void 0, V), _t = (i,
     throw Error("Value passed to 'css' function must be a 'css' function result: " + n + ". Use 'unsafeCSS' to pass non-literal values, but take care to ensure page security.");
   })(r) + i[o + 1], i[0]);
   return new dt(e, i, V);
-}, yt = (i, t) => {
+}, mt = (i, t) => {
   if (q) i.adoptedStyleSheets = t.map((e) => e instanceof CSSStyleSheet ? e : e.styleSheet);
   else for (const e of t) {
     const s = document.createElement("style"), r = N.litNonce;
@@ -45,7 +45,7 @@ const $t = (i) => new dt(typeof i == "string" ? i : i + "", void 0, V), _t = (i,
  * Copyright 2017 Google LLC
  * SPDX-License-Identifier: BSD-3-Clause
  */
-const { is: mt, defineProperty: vt, getOwnPropertyDescriptor: bt, getOwnPropertyNames: wt, getOwnPropertySymbols: At, getPrototypeOf: xt } = Object, _ = globalThis, X = _.trustedTypes, Et = X ? X.emptyScript : "", L = _.reactiveElementPolyfillSupport, C = (i, t) => i, H = { toAttribute(i, t) {
+const { is: yt, defineProperty: vt, getOwnPropertyDescriptor: bt, getOwnPropertyNames: wt, getOwnPropertySymbols: At, getPrototypeOf: xt } = Object, _ = globalThis, X = _.trustedTypes, Et = X ? X.emptyScript : "", L = _.reactiveElementPolyfillSupport, C = (i, t) => i, H = { toAttribute(i, t) {
   switch (t) {
     case Boolean:
       i = i ? Et : null;
@@ -73,7 +73,7 @@ const { is: mt, defineProperty: vt, getOwnPropertyDescriptor: bt, getOwnProperty
       }
   }
   return e;
-} }, G = (i, t) => !mt(i, t), Y = { attribute: !0, type: String, converter: H, reflect: !1, useDefault: !1, hasChanged: G };
+} }, G = (i, t) => !yt(i, t), Y = { attribute: !0, type: String, converter: H, reflect: !1, useDefault: !1, hasChanged: G };
 Symbol.metadata ?? (Symbol.metadata = Symbol("metadata")), _.litPropertyMetadata ?? (_.litPropertyMetadata = /* @__PURE__ */ new WeakMap());
 let A = class extends HTMLElement {
   static addInitializer(t) {
@@ -159,7 +159,7 @@ let A = class extends HTMLElement {
   }
   createRenderRoot() {
     const t = this.shadowRoot ?? this.attachShadow(this.constructor.shadowRootOptions);
-    return yt(t, this.constructor.elementStyles), t;
+    return mt(t, this.constructor.elementStyles), t;
   }
   connectedCallback() {
     var t;
@@ -285,8 +285,8 @@ A.elementStyles = [], A.shadowRootOptions = { mode: "open" }, A[C("elementProper
  * SPDX-License-Identifier: BSD-3-Clause
  */
 const P = globalThis, Q = (i) => i, D = P.trustedTypes, tt = D ? D.createPolicy("lit-html", { createHTML: (i) => i }) : void 0, ht = "$lit$", $ = `lit$${Math.random().toFixed(9).slice(2)}$`, pt = "?" + $, St = `<${pt}>`, b = document, k = () => b.createComment(""), U = (i) => i === null || typeof i != "object" && typeof i != "function", K = Array.isArray, Ct = (i) => K(i) || typeof (i == null ? void 0 : i[Symbol.iterator]) == "function", I = `[ 	
-\f\r]`, S = /<(?:(!--|\/[^a-zA-Z])|(\/?[a-zA-Z][^>\s]*)|(\/?$))/g, et = /-->/g, st = />/g, y = RegExp(`>|${I}(?:([^\\s"'>=/]+)(${I}*=${I}*(?:[^ 	
-\f\r"'\`<>=]|("|')|))|$)`, "g"), it = /'/g, rt = /"/g, ut = /^(?:script|style|textarea|title)$/i, Pt = (i) => (t, ...e) => ({ _$litType$: i, strings: t, values: e }), u = Pt(1), x = Symbol.for("lit-noChange"), c = Symbol.for("lit-nothing"), ot = /* @__PURE__ */ new WeakMap(), m = b.createTreeWalker(b, 129);
+\f\r]`, S = /<(?:(!--|\/[^a-zA-Z])|(\/?[a-zA-Z][^>\s]*)|(\/?$))/g, et = /-->/g, st = />/g, m = RegExp(`>|${I}(?:([^\\s"'>=/]+)(${I}*=${I}*(?:[^ 	
+\f\r"'\`<>=]|("|')|))|$)`, "g"), it = /'/g, rt = /"/g, ut = /^(?:script|style|textarea|title)$/i, Pt = (i) => (t, ...e) => ({ _$litType$: i, strings: t, values: e }), u = Pt(1), x = Symbol.for("lit-noChange"), c = Symbol.for("lit-nothing"), ot = /* @__PURE__ */ new WeakMap(), y = b.createTreeWalker(b, 129);
 function gt(i, t) {
   if (!K(i) || !i.hasOwnProperty("raw")) throw Error("invalid template strings array");
   return tt !== void 0 ? tt.createHTML(t) : t;
@@ -297,8 +297,8 @@ const Ot = (i, t) => {
   for (let l = 0; l < e; l++) {
     const a = i[l];
     let h, p, d = -1, g = 0;
-    for (; g < a.length && (n.lastIndex = g, p = n.exec(a), p !== null); ) g = n.lastIndex, n === S ? p[1] === "!--" ? n = et : p[1] !== void 0 ? n = st : p[2] !== void 0 ? (ut.test(p[2]) && (r = RegExp("</" + p[2], "g")), n = y) : p[3] !== void 0 && (n = y) : n === y ? p[0] === ">" ? (n = r ?? S, d = -1) : p[1] === void 0 ? d = -2 : (d = n.lastIndex - p[2].length, h = p[1], n = p[3] === void 0 ? y : p[3] === '"' ? rt : it) : n === rt || n === it ? n = y : n === et || n === st ? n = S : (n = y, r = void 0);
-    const f = n === y && i[l + 1].startsWith("/>") ? " " : "";
+    for (; g < a.length && (n.lastIndex = g, p = n.exec(a), p !== null); ) g = n.lastIndex, n === S ? p[1] === "!--" ? n = et : p[1] !== void 0 ? n = st : p[2] !== void 0 ? (ut.test(p[2]) && (r = RegExp("</" + p[2], "g")), n = m) : p[3] !== void 0 && (n = m) : n === m ? p[0] === ">" ? (n = r ?? S, d = -1) : p[1] === void 0 ? d = -2 : (d = n.lastIndex - p[2].length, h = p[1], n = p[3] === void 0 ? m : p[3] === '"' ? rt : it) : n === rt || n === it ? n = m : n === et || n === st ? n = S : (n = m, r = void 0);
+    const f = n === m && i[l + 1].startsWith("/>") ? " " : "";
     o += n === S ? a + St : d >= 0 ? (s.push(h), a.slice(0, d) + ht + a.slice(d) + $ + f) : a + $ + (d === -2 ? l : f);
   }
   return [gt(i, o + (i[e] || "<?>") + (t === 2 ? "</svg>" : t === 3 ? "</math>" : "")), s];
@@ -309,11 +309,11 @@ class z {
     this.parts = [];
     let o = 0, n = 0;
     const l = t.length - 1, a = this.parts, [h, p] = Ot(t, e);
-    if (this.el = z.createElement(h, s), m.currentNode = this.el.content, e === 2 || e === 3) {
+    if (this.el = z.createElement(h, s), y.currentNode = this.el.content, e === 2 || e === 3) {
       const d = this.el.content.firstChild;
       d.replaceWith(...d.childNodes);
     }
-    for (; (r = m.nextNode()) !== null && a.length < l; ) {
+    for (; (r = y.nextNode()) !== null && a.length < l; ) {
       if (r.nodeType === 1) {
         if (r.hasAttributes()) for (const d of r.getAttributeNames()) if (d.endsWith(ht)) {
           const g = p[n++], f = r.getAttribute(d).split($), R = /([.?@])?(.*)/.exec(g);
@@ -323,7 +323,7 @@ class z {
           const d = r.textContent.split($), g = d.length - 1;
           if (g > 0) {
             r.textContent = D ? D.emptyScript : "";
-            for (let f = 0; f < g; f++) r.append(d[f], k()), m.nextNode(), a.push({ type: 2, index: ++o });
+            for (let f = 0; f < g; f++) r.append(d[f], k()), y.nextNode(), a.push({ type: 2, index: ++o });
             r.append(d[g], k());
           }
         }
@@ -359,16 +359,16 @@ class kt {
   }
   u(t) {
     const { el: { content: e }, parts: s } = this._$AD, r = ((t == null ? void 0 : t.creationScope) ?? b).importNode(e, !0);
-    m.currentNode = r;
-    let o = m.nextNode(), n = 0, l = 0, a = s[0];
+    y.currentNode = r;
+    let o = y.nextNode(), n = 0, l = 0, a = s[0];
     for (; a !== void 0; ) {
       if (n === a.index) {
         let h;
         a.type === 2 ? h = new T(o, o.nextSibling, this, t) : a.type === 1 ? h = new a.ctor(o, a.name, a.strings, this, t) : a.type === 6 && (h = new Mt(o, this, t)), this._$AV.push(h), a = s[++l];
       }
-      n !== (a == null ? void 0 : a.index) && (o = m.nextNode(), n++);
+      n !== (a == null ? void 0 : a.index) && (o = y.nextNode(), n++);
     }
-    return m.currentNode = b, r;
+    return y.currentNode = b, r;
   }
   p(t) {
     let e = 0;
@@ -695,6 +695,7 @@ let w = class extends O {
             <div class="dlg-detail-row"><span class="dlg-detail-label">Liczy do średniej</span><span>${i.counts ? "Tak" : "Nie"}</span></div>
             ${i.title ? u`<div class="dlg-detail-row dlg-detail-row--block"><span class="dlg-detail-label">Temat</span><span class="dlg-detail-text">${i.title}</span></div>` : c}
             ${i.description ? u`<div class="dlg-detail-row"><span class="dlg-detail-label">Poprawa</span><span>${i.description}</span></div>` : c}
+            ${i.comment ? u`<div class="dlg-detail-row dlg-detail-row--block"><span class="dlg-detail-label">Komentarz</span><span class="dlg-detail-text">${i.comment}</span></div>` : c}
           </div>
         ` : c}
       </ha-dialog>
