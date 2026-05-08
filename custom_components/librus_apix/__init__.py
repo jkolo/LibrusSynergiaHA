@@ -61,15 +61,19 @@ PLATFORMS = ["sensor", "calendar", "event"]
 
 _CARD_PATH = "/librus_apix/librus-messages-card.js"
 
+# Odczyt manifestu przy załadowaniu modułu (poza event loop) — cache bust dla karty Lovelace.
+try:
+    import json as _json
+    _CARD_VERSION: str = _json.loads(
+        (Path(__file__).parent / "manifest.json").read_text()
+    )["version"]
+except Exception:  # noqa: BLE001
+    _CARD_VERSION = ""
+
 
 def _card_url_with_version() -> str:
     """Zwróć URL karty z ?v= z manifest.json — bust cache przy update."""
-    import json
-    try:
-        manifest = json.loads((Path(__file__).parent / "manifest.json").read_text())
-        return f"{_CARD_PATH}?v={manifest['version']}"
-    except Exception:  # noqa: BLE001
-        return _CARD_PATH
+    return f"{_CARD_PATH}?v={_CARD_VERSION}" if _CARD_VERSION else _CARD_PATH
 
 
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
@@ -114,7 +118,9 @@ async def _async_ensure_lovelace_resource(hass: HomeAssistant, url: str) -> None
     await store.async_save(data)
 
     # Powiadom na żywo aktywną kolekcję zasobów (działa gdy lovelace już skonfigurowane)
-    lovelace_resources = hass.data.get("lovelace", {}).get("resources")
+    # hass.data["lovelace"] to LovelaceData (obiekt, nie dict) — używamy getattr
+    _lovelace_data = hass.data.get("lovelace")
+    lovelace_resources = getattr(_lovelace_data, "resources", None) if _lovelace_data is not None else None
     if lovelace_resources is not None:
         try:
             live_items = lovelace_resources.async_items()
