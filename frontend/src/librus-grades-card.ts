@@ -59,6 +59,10 @@ export class LibrusGradesCard extends LitElement {
     return 6;
   }
 
+  getGridOptions() {
+    return { columns: 6, rows: 6, min_columns: 3, min_rows: 2 };
+  }
+
   private get _grades(): HassGrade[] {
     if (!this.hass || !this._config) return [];
     const all: HassGrade[] = [];
@@ -71,9 +75,8 @@ export class LibrusGradesCard extends LitElement {
     return filtered.sort((a, b) => parseDateForSort(a.date) - parseDateForSort(b.date));
   }
 
-  private async _openDialog(grade: HassGrade): Promise<void> {
+  private _openDialog(grade: HassGrade): void {
     this._selectedGrade = grade;
-    await this.updateComplete;
     this._dialog?.showModal();
   }
 
@@ -102,37 +105,31 @@ export class LibrusGradesCard extends LitElement {
 
   private _renderDialog() {
     const g = this._selectedGrade;
-    if (!g) return nothing;
-    const { cssClass } = gradeTypeInfo(g.category);
-    const countsLabel = g.counts ? "Tak" : "Nie";
     return html`
-      <dialog
-        @close="${() => { this._selectedGrade = null; }}"
-      >
-        <div class="dlg-header">
-          <div class="dlg-meta">
-            <div class="dlg-subject">${g.subject}</div>
-            <div class="dlg-category">${g.category || "—"}${g.category && g.date ? " · " : ""}${formatDate(g.date)}</div>
+      <dialog @close="${() => { this._selectedGrade = null; }}">
+        ${g ? html`
+          <div class="dlg-header">
+            <div class="dlg-meta">
+              <div class="dlg-subject">${g.subject}</div>
+              <div class="dlg-category">${g.category || "—"}${g.category && g.date ? " · " : ""}${formatDate(g.date)}</div>
+            </div>
+            <ha-icon-button
+              .label=${"Zamknij"}
+              .path=${"M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"}
+              @click="${() => this._dialog?.close()}"
+            ></ha-icon-button>
           </div>
-          <ha-icon-button
-            .label=${"Zamknij"}
-            .path=${"M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"}
-            @click="${() => this._dialog?.close()}"
-          ></ha-icon-button>
-        </div>
-        <div class="dlg-body">
-          <div class="dlg-grade-large ${cssClass}">${g.grade}</div>
-          <div class="dlg-details">
-            ${g.teacher ? html`<div class="dlg-detail-row"><span class="dlg-detail-label">Nauczyciel</span><span>${g.teacher}</span></div>` : nothing}
-            ${g.weight != null ? html`<div class="dlg-detail-row"><span class="dlg-detail-label">Waga</span><span>${g.weight}</span></div>` : nothing}
-            <div class="dlg-detail-row"><span class="dlg-detail-label">Liczy do średniej</span><span>${countsLabel}</span></div>
-            ${g.title ? html`<div class="dlg-detail-row"><span class="dlg-detail-label">Temat</span><span>${g.title}</span></div>` : nothing}
-            ${g.description ? html`<div class="dlg-detail-row dlg-description"><span class="dlg-detail-label">Komentarz</span><span>${g.description}</span></div>` : nothing}
+          <div class="dlg-body">
+            <div class="dlg-grade-large ${gradeTypeInfo(g.category).cssClass}">${g.grade}</div>
+            <div class="dlg-details">
+              ${g.teacher ? html`<div class="dlg-detail-row"><span class="dlg-detail-label">Nauczyciel</span><span>${g.teacher}</span></div>` : nothing}
+              ${g.weight != null ? html`<div class="dlg-detail-row"><span class="dlg-detail-label">Waga</span><span>${g.weight}</span></div>` : nothing}
+              <div class="dlg-detail-row"><span class="dlg-detail-label">Liczy do średniej</span><span>${g.counts ? "Tak" : "Nie"}</span></div>
+              ${g.title ? html`<div class="dlg-detail-row"><span class="dlg-detail-label">Temat</span><span>${g.title}</span></div>` : nothing}
+              ${g.description ? html`<div class="dlg-detail-row dlg-description"><span class="dlg-detail-label">Komentarz</span><span>${g.description}</span></div>` : nothing}
+            </div>
           </div>
-        </div>
-        <div class="dlg-footer">
-          <button class="btn-close" @click="${() => this._dialog?.close()}">Zamknij</button>
-        </div>
+        ` : nothing}
       </dialog>
     `;
   }
@@ -282,7 +279,7 @@ export class LibrusGradesCard extends LitElement {
     }
 
     /* Dialog */
-    dialog {
+    dialog[open] {
       max-width: min(480px, 95vw);
       max-height: 80vh;
       border: none;
@@ -362,25 +359,6 @@ export class LibrusGradesCard extends LitElement {
       flex-shrink: 0;
     }
 
-    .dlg-footer {
-      display: flex;
-      justify-content: flex-end;
-      padding: 12px 20px;
-      border-top: 1px solid var(--divider-color);
-      flex-shrink: 0;
-    }
-    .btn-close {
-      background: var(--secondary-background-color);
-      border: none;
-      padding: 8px 20px;
-      border-radius: 4px;
-      cursor: pointer;
-      color: var(--primary-text-color);
-      font-size: 0.9em;
-    }
-    .btn-close:hover {
-      background: var(--divider-color);
-    }
   `;
 }
 
