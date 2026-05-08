@@ -109,10 +109,10 @@ export class LibrusGradesCard extends LitElement {
     return html`
       <ha-dialog
         .open=${this._dlgOpen}
-        .heading=${g?.subject ?? ""}
         @closed=${() => this._closeDialog()}
       >
         ${g ? html`
+          <div class="dlg-title">${g.subject}</div>
           <div class="dlg-category-row">${g.category}${g.category && g.date ? " · " : ""}${formatDate(g.date)}</div>
           <div class="dlg-grade-large ${gradeTypeInfo(g.category).cssClass}">${g.grade}</div>
           <div class="dlg-details">
@@ -276,6 +276,12 @@ export class LibrusGradesCard extends LitElement {
     }
 
     /* Zawartość ha-dialog (default slot = nasz shadow DOM) */
+    .dlg-title {
+      font-size: 1.1em;
+      font-weight: 600;
+      color: var(--primary-text-color);
+      margin-bottom: 2px;
+    }
     .dlg-category-row {
       font-size: 0.85em;
       color: var(--secondary-text-color);

@@ -683,10 +683,10 @@ let w = class extends O {
     return u`
       <ha-dialog
         .open=${this._dlgOpen}
-        .heading=${(i == null ? void 0 : i.subject) ?? ""}
         @closed=${() => this._closeDialog()}
       >
         ${i ? u`
+          <div class="dlg-title">${i.subject}</div>
           <div class="dlg-category-row">${i.category}${i.category && i.date ? " · " : ""}${at(i.date)}</div>
           <div class="dlg-grade-large ${lt(i.category).cssClass}">${i.grade}</div>
           <div class="dlg-details">
@@ -844,6 +844,12 @@ w.styles = _t`
     }
 
     /* Zawartość ha-dialog (default slot = nasz shadow DOM) */
+    .dlg-title {
+      font-size: 1.1em;
+      font-weight: 600;
+      color: var(--primary-text-color);
+      margin-bottom: 2px;
+    }
     .dlg-category-row {
       font-size: 0.85em;
       color: var(--secondary-text-color);
