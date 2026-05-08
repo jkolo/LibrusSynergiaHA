@@ -43,23 +43,6 @@ export class LibrusGradesCard extends LitElement {
   @state() private _selectedGrade: HassGrade | null = null;
   @state() private _dlgOpen = false;
 
-  private _onKeydown = (e: KeyboardEvent) => {
-    if (e.key === "Escape" && this._dlgOpen) {
-      e.stopPropagation();
-      this._closeDialog();
-    }
-  };
-
-  connectedCallback() {
-    super.connectedCallback();
-    window.addEventListener("keydown", this._onKeydown);
-  }
-
-  disconnectedCallback() {
-    super.disconnectedCallback();
-    window.removeEventListener("keydown", this._onKeydown);
-  }
-
   static getStubConfig(): LibrusGradesCardConfig {
     return { type: "librus-grades-card", entities: [], title: "Oceny" };
   }
@@ -124,37 +107,23 @@ export class LibrusGradesCard extends LitElement {
   private _renderDialog() {
     const g = this._selectedGrade;
     return html`
-      <div
-        class="dlg-overlay${this._dlgOpen ? " dlg-overlay--open" : ""}"
-        @click="${(e: Event) => { if (e.target === e.currentTarget) this._closeDialog(); }}"
-        aria-hidden="${String(!this._dlgOpen)}"
+      <ha-dialog
+        .open=${this._dlgOpen}
+        .heading=${g?.subject ?? ""}
+        @closed=${() => this._closeDialog()}
       >
-        <div class="dlg-panel" role="dialog" aria-modal="true">
-          ${g ? html`
-            <div class="dlg-header">
-              <div class="dlg-meta">
-                <div class="dlg-subject">${g.subject}</div>
-                <div class="dlg-category">${g.category || "—"}${g.category && g.date ? " · " : ""}${formatDate(g.date)}</div>
-              </div>
-              <ha-icon-button
-                .label=${"Zamknij"}
-                .path=${"M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"}
-                @click="${() => this._closeDialog()}"
-              ></ha-icon-button>
-            </div>
-            <div class="dlg-body">
-              <div class="dlg-grade-large ${gradeTypeInfo(g.category).cssClass}">${g.grade}</div>
-              <div class="dlg-details">
-                ${g.teacher ? html`<div class="dlg-detail-row"><span class="dlg-detail-label">Nauczyciel</span><span>${g.teacher}</span></div>` : nothing}
-                ${g.weight != null ? html`<div class="dlg-detail-row"><span class="dlg-detail-label">Waga</span><span>${g.weight}</span></div>` : nothing}
-                <div class="dlg-detail-row"><span class="dlg-detail-label">Liczy do średniej</span><span>${g.counts ? "Tak" : "Nie"}</span></div>
-                ${g.title ? html`<div class="dlg-detail-row dlg-detail-row--block"><span class="dlg-detail-label">Temat</span><span class="dlg-detail-text">${g.title}</span></div>` : nothing}
-                ${g.description ? html`<div class="dlg-detail-row"><span class="dlg-detail-label">Poprawa</span><span>${g.description}</span></div>` : nothing}
-              </div>
-            </div>
-          ` : nothing}
-        </div>
-      </div>
+        ${g ? html`
+          <div class="dlg-category-row">${g.category}${g.category && g.date ? " · " : ""}${formatDate(g.date)}</div>
+          <div class="dlg-grade-large ${gradeTypeInfo(g.category).cssClass}">${g.grade}</div>
+          <div class="dlg-details">
+            ${g.teacher ? html`<div class="dlg-detail-row"><span class="dlg-detail-label">Nauczyciel</span><span>${g.teacher}</span></div>` : nothing}
+            ${g.weight != null ? html`<div class="dlg-detail-row"><span class="dlg-detail-label">Waga</span><span>${g.weight}</span></div>` : nothing}
+            <div class="dlg-detail-row"><span class="dlg-detail-label">Liczy do średniej</span><span>${g.counts ? "Tak" : "Nie"}</span></div>
+            ${g.title ? html`<div class="dlg-detail-row dlg-detail-row--block"><span class="dlg-detail-label">Temat</span><span class="dlg-detail-text">${g.title}</span></div>` : nothing}
+            ${g.description ? html`<div class="dlg-detail-row"><span class="dlg-detail-label">Poprawa</span><span>${g.description}</span></div>` : nothing}
+          </div>
+        ` : nothing}
+      </ha-dialog>
     `;
   }
 
@@ -235,15 +204,9 @@ export class LibrusGradesCard extends LitElement {
       position: relative;
       transition: background 0.15s;
     }
-    .grade-row:hover {
-      background: var(--secondary-background-color);
-    }
-    .grade-row.recent {
-      background: color-mix(in srgb, var(--primary-color) 8%, transparent);
-    }
-    .grade-row.recent:hover {
-      background: color-mix(in srgb, var(--primary-color) 15%, transparent);
-    }
+    .grade-row:hover { background: var(--secondary-background-color); }
+    .grade-row.recent { background: color-mix(in srgb, var(--primary-color) 8%, transparent); }
+    .grade-row.recent:hover { background: color-mix(in srgb, var(--primary-color) 15%, transparent); }
 
     /* CSS tooltip */
     .grade-row[data-tooltip]:not([data-tooltip=""]):hover::after {
@@ -312,58 +275,11 @@ export class LibrusGradesCard extends LitElement {
       font-size: 0.9em;
     }
 
-    /* Overlay — position:fixed nie blokuje scroll body (w odróżnieniu od showModal) */
-    .dlg-overlay {
-      display: none;
-      position: fixed;
-      inset: 0;
-      z-index: 9999;
-      background: rgba(0, 0, 0, 0.45);
-      backdrop-filter: blur(2px);
-      align-items: center;
-      justify-content: center;
-    }
-    .dlg-overlay--open {
-      display: flex;
-    }
-
-    .dlg-panel {
-      max-width: min(480px, 95vw);
-      max-height: 80vh;
-      overflow: hidden;
-      display: flex;
-      flex-direction: column;
-      border-radius: var(--ha-card-border-radius, 12px);
-      box-shadow: var(--ha-card-box-shadow, 0 4px 16px rgba(0, 0, 0, 0.4));
-      background: var(--card-background-color, #fff);
-      color: var(--primary-text-color);
-    }
-
-    .dlg-header {
-      display: flex;
-      justify-content: space-between;
-      align-items: flex-start;
-      padding: 16px 8px 12px 20px;
-      border-bottom: 1px solid var(--divider-color);
-      flex-shrink: 0;
-    }
-    .dlg-subject {
-      font-size: 1.1em;
-      font-weight: 600;
-    }
-    .dlg-category {
-      font-size: 0.82em;
+    /* Zawartość ha-dialog (default slot = nasz shadow DOM) */
+    .dlg-category-row {
+      font-size: 0.85em;
       color: var(--secondary-text-color);
-      margin-top: 2px;
-    }
-
-    .dlg-body {
-      flex: 1;
-      overflow-y: auto;
-      padding: 20px;
-      display: flex;
-      flex-direction: column;
-      gap: 16px;
+      margin-bottom: 16px;
     }
     .dlg-grade-large {
       font-size: 2.8em;
@@ -373,9 +289,8 @@ export class LibrusGradesCard extends LitElement {
       border-radius: 8px;
       color: #fff;
       background: var(--badge-bg, var(--secondary-text-color, #888));
-      flex-shrink: 0;
+      margin-bottom: 16px;
     }
-
     .dlg-details {
       display: flex;
       flex-direction: column;
