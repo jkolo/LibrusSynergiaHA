@@ -68,7 +68,8 @@ export class LibrusGradesCard extends LitElement {
       if (details) all.push(...details);
     }
     const filtered = this._config.only_recent ? all.filter(g => g.is_recent) : all;
-    return filtered.sort((a, b) => parseDateForSort(a.date) - parseDateForSort(b.date));
+    const sorted = filtered.sort((a, b) => parseDateForSort(a.date) - parseDateForSort(b.date));
+    return (this._config.sort_order ?? "desc") === "desc" ? sorted.reverse() : sorted;
   }
 
   private _openDialog(grade: HassGrade): void {
@@ -122,7 +123,7 @@ export class LibrusGradesCard extends LitElement {
               ${g.weight != null ? html`<div class="dlg-detail-row"><span class="dlg-detail-label">Waga</span><span>${g.weight}</span></div>` : nothing}
               <div class="dlg-detail-row"><span class="dlg-detail-label">Liczy do średniej</span><span>${g.counts ? "Tak" : "Nie"}</span></div>
               ${g.title ? html`<div class="dlg-detail-row"><span class="dlg-detail-label">Temat</span><span>${g.title}</span></div>` : nothing}
-              ${g.description ? html`<div class="dlg-detail-row dlg-description"><span class="dlg-detail-label">Komentarz</span><span>${g.description}</span></div>` : nothing}
+              ${g.description ? html`<div class="dlg-detail-row"><span class="dlg-detail-label">Poprawa</span><span>${g.description}</span></div>` : nothing}
             </div>
           </div>
         ` : nothing}

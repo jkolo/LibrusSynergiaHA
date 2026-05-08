@@ -43,6 +43,7 @@ export interface LibrusGradesCardConfig {
   entities: string[];
   title?: string;
   only_recent?: boolean;
+  sort_order?: "asc" | "desc";
 }
 
 export interface HomeAssistant {

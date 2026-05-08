@@ -663,14 +663,15 @@ let w = class extends k {
     return 6;
   }
   get _grades() {
-    var t;
+    var s;
     if (!this.hass || !this._config) return [];
     const i = [];
-    for (const s of this._config.entities) {
-      const r = this.hass.states[s], o = (t = r == null ? void 0 : r.attributes) == null ? void 0 : t.grade_details;
-      o && i.push(...o);
+    for (const r of this._config.entities) {
+      const o = this.hass.states[r], n = (s = o == null ? void 0 : o.attributes) == null ? void 0 : s.grade_details;
+      n && i.push(...n);
     }
-    return (this._config.only_recent ? i.filter((s) => s.is_recent) : i).sort((s, r) => oe(s.date) - oe(r.date));
+    const t = (this._config.only_recent ? i.filter((r) => r.is_recent) : i).sort((r, o) => oe(r.date) - oe(o.date));
+    return (this._config.sort_order ?? "desc") === "desc" ? t.reverse() : t;
   }
   _openDialog(i) {
     var e;
@@ -725,7 +726,7 @@ let w = class extends k {
               ${i.weight != null ? u`<div class="dlg-detail-row"><span class="dlg-detail-label">Waga</span><span>${i.weight}</span></div>` : c}
               <div class="dlg-detail-row"><span class="dlg-detail-label">Liczy do średniej</span><span>${i.counts ? "Tak" : "Nie"}</span></div>
               ${i.title ? u`<div class="dlg-detail-row"><span class="dlg-detail-label">Temat</span><span>${i.title}</span></div>` : c}
-              ${i.description ? u`<div class="dlg-detail-row dlg-description"><span class="dlg-detail-label">Komentarz</span><span>${i.description}</span></div>` : c}
+              ${i.description ? u`<div class="dlg-detail-row"><span class="dlg-detail-label">Poprawa</span><span>${i.description}</span></div>` : c}
             </div>
           </div>
         ` : c}

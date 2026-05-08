@@ -176,7 +176,7 @@ class LibrusAuthError(Exception):
 
 _DESCRIPTIVE_DESC_KEYS = (
     "Ocena", "Przedmiot", "Obszar oceniania", "Umiejętność",
-    "Data", "Nauczyciel", "Dodał", "Komentarz",
+    "Data", "Nauczyciel", "Dodał", "Kategoria", "Poprawa oceny", "Komentarz",
 )
 
 
@@ -367,6 +367,8 @@ class LibrusApiClient:
                             value = grade.value
                         except ValueError:
                             value = None
+                        _desc_raw = getattr(grade, "desc", "") or ""
+                        _parsed = _parse_descriptive_desc(_desc_raw)
                         all_grades.append({
                             "subject": subject,
                             "grade": grade.grade,
@@ -375,8 +377,8 @@ class LibrusApiClient:
                             "weight": grade.weight,
                             "date": grade.date,
                             "category": grade.category,
-                            "description": getattr(grade, "desc", ""),
-                            "title": getattr(grade, "title", ""),
+                            "description": _parsed.get("Poprawa oceny", ""),
+                            "title": _parsed.get("Komentarz", ""),
                             "teacher": getattr(grade, "teacher", ""),
                             "semester": grade.semester,
                             "type": "numeric",
@@ -400,7 +402,7 @@ class LibrusApiClient:
                                 "weight": 0,
                                 "date": desc_grade.date,
                                 "category": parsed.get("Umiejętność", ""),
-                                "description": parsed.get("Komentarz", ""),
+                                "description": "",
                                 "title": parsed.get("Obszar oceniania", ""),
                                 "teacher": parsed.get("Nauczyciel", ""),
                                 "semester": desc_grade.semester,
