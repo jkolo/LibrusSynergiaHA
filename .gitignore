@@ -135,3 +135,9 @@ Thumbs.db
 
 # Test credentials
 test_credentials.yaml
+
+# Frontend build
+frontend/node_modules/
+frontend/.vite/
+!dist/
+!dist/librus-messages-card.js

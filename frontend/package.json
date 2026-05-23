@@ -1,0 +1,23 @@
+{
+  "name": "librus-messages-card",
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "build": "vite build && vite build --config vite.grades.config.ts && vite build --config vite.subject-grades.config.ts",
+    "watch": "vite build --watch",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "lit": "^3.3.1"
+  },
+  "devDependencies": {
+    "@open-wc/testing": "^4.0.0",
+    "@types/jsdom": "^28.0.1",
+    "@web/test-runner": "^0.18.0",
+    "custom-card-helpers": "^1.9.0",
+    "jsdom": "^29.1.1",
+    "typescript": "^5.4.0",
+    "vite": "^5.2.0",
+    "vitest": "^1.6.0"
+  }
+}

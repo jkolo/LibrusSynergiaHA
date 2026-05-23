@@ -1,0 +1,164 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Konfiguracja integracji Librus APIX",
+        "description": "Podaj swoje dane logowania do Librus Synergia",
+        "data": {
+          "username": "Login",
+          "password": "Hasło"
+        }
+      },
+      "reauth_confirm": {
+        "title": "Ponowne uwierzytelnienie Librus APIX",
+        "description": "Twoje hasło do Librus przestało działać dla {username}. Podaj nowe hasło, aby przywrócić integrację.",
+        "data": {
+          "password": "Hasło"
+        }
+      },
+      "reconfigure": {
+        "title": "Rekonfiguracja Librus APIX",
+        "description": "Zmień dane logowania do Librus Synergia.",
+        "data": {
+          "username": "Login",
+          "password": "Hasło"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Nie udało się połączyć z Librus. Sprawdź dane logowania.",
+      "unknown": "Wystąpił nieoczekiwany błąd"
+    },
+    "abort": {
+      "already_configured": "Konto jest już skonfigurowane",
+      "reauth_successful": "Ponowne uwierzytelnienie powiodło się — integracja została przeładowana.",
+      "reconfigure_successful": "Rekonfiguracja zakończona sukcesem — integracja została przeładowana.",
+      "account_mismatch": "Nowy login nie pasuje do tego config entry. Aby użyć innego konta, dodaj je jako nową integrację."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Synchronizacja zachowująca się jak człowiek",
+        "description": "Dostosuj jak integracja rozkłada synchronizacje w czasie, by wyglądały jak naturalne klikanie użytkownika. Wartości domyślne są bezpieczne.",
+        "data": {
+          "base_minutes": "Bazowy interwał (minuty)",
+          "jitter": "Losowe wahanie (0.0–0.5)",
+          "quiet_hours_enabled": "Pomijaj synchronizacje w godzinach ciszy nocnej",
+          "quiet_start": "Cisza nocna — początek (HH:MM)",
+          "quiet_end": "Cisza nocna — koniec (HH:MM)",
+          "off_school_multiplier": "Mnożnik w weekendy, święta i ferie",
+          "humanize": "Włącz tryb naturalnej synchronizacji (wyłącz = stały interwał, tryb legacy)",
+          "message_notify": "Pokazuj baner powiadomienia przy nowej wiadomości (persistent_notification)"
+        }
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "student_info": {
+        "name": "Informacje o uczniu"
+      },
+      "lucky_number": {
+        "name": "Szczęśliwy numerek"
+      },
+      "grades": {
+        "name": "Oceny"
+      },
+      "overall_average": {
+        "name": "Średnia ocen"
+      },
+      "messages": {
+        "name": "Wiadomości"
+      },
+      "upcoming_exams": {
+        "name": "Zapowiedzi"
+      },
+      "latest_grade": {
+        "name": "Ostatnia ocena"
+      },
+      "latest_message": {
+        "name": "Ostatnia wiadomość"
+      },
+      "next_exam": {
+        "name": "Najbliższy sprawdzian"
+      },
+      "attendance_frequency": {
+        "name": "Frekwencja"
+      },
+      "absences": {
+        "name": "Nieobecności"
+      },
+      "latest_absence": {
+        "name": "Ostatnia nieobecność"
+      },
+      "announcements": {
+        "name": "Ogłoszenia"
+      },
+      "last_refresh": {
+        "name": "Ostatnie odświeżenie"
+      },
+      "latest_announcement": {
+        "name": "Ostatnie ogłoszenie"
+      }
+    },
+    "calendar": {
+      "schedule": {
+        "name": "Terminarz"
+      },
+      "timetable": {
+        "name": "Plan lekcji"
+      },
+      "attendance": {
+        "name": "Obecności"
+      },
+      "grades_calendar": {
+        "name": "Oceny"
+      }
+    },
+    "event": {
+      "new_grade": {
+        "name": "Nowa ocena"
+      },
+      "new_message": {
+        "name": "Nowa wiadomość"
+      },
+      "new_exam": {
+        "name": "Nowa zapowiedź"
+      },
+      "new_announcement": {
+        "name": "Nowe ogłoszenie"
+      },
+      "new_absence": {
+        "name": "Nowa nieobecność"
+      }
+    }
+  },
+  "exceptions": {
+    "auth_failed": {
+      "message": "Uwierzytelnianie nie powiodło się — wprowadź hasło ponownie."
+    },
+    "invalid_entry": {
+      "message": "Wpis konfiguracji {entry_id} nie istnieje lub nie jest załadowany."
+    },
+    "entry_not_initialized": {
+      "message": "Wpis konfiguracji nie jest jeszcze w pełni zainicjowany."
+    },
+    "message_not_found": {
+      "message": "Wiadomość o identyfikatorze '{href}' nie istnieje w bieżących danych."
+    },
+    "message_fetch_failed": {
+      "message": "Nie udało się pobrać treści wiadomości '{href}'. Librus mógł zmienić strukturę HTML."
+    }
+  },
+  "issues": {
+    "librus_lib_outdated": {
+      "title": "Parser Librus może być nieaktualny",
+      "description": "Integracja Librus nie zdołała pobrać żadnych danych dla użytkownika {username} przez kilka kolejnych odświeżeń. Najczęstsza przyczyna to zmiana struktury HTML/CSS po stronie Librusa — biblioteka `librus-apix` wymaga aktualizacji. Sprawdź issue tracker integracji w poszukiwaniu nowszej wersji."
+    },
+    "auth_failed": {
+      "title": "Wymagane ponowne uwierzytelnienie",
+      "description": "Uwierzytelnianie konta {username} nie powiodło się trwale. Home Assistant uruchomił ponowne uwierzytelnianie — otwórz Ustawienia → Urządzenia i Usługi i wprowadź nowe hasło do Librus, aby przywrócić integrację."
+    }
+  }
+}

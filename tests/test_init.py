@@ -1,64 +1,145 @@
-"""Test the Librus APIX integration."""
+"""Test setup/unload of the Librus APIX integration."""
 
-import pytest
+from __future__ import annotations
+
+from pathlib import Path
+from unittest.mock import AsyncMock, MagicMock, patch
+
+from homeassistant.config_entries import ConfigEntryState
 from homeassistant.core import HomeAssistant
-from homeassistant.config_entries import ConfigEntry
-from unittest.mock import AsyncMock, patch, MagicMock
+from homeassistant.util import dt as dt_util
+from librus_apix.student_information import StudentInformation
 
-from custom_components.librus_apix.const import DOMAIN
-
-
-@pytest.fixture
-def mock_config_entry():
-    """Return a mock config entry."""
-    return ConfigEntry(
-        version=1,
-        domain=DOMAIN,
-        title="Test Librus",
-        data={"username": "test_user", "password": "test_password"},
-        source="user",
-        entry_id="test_entry_id"
-    )
+from custom_components.librus_apix._data_store import LibrusDataStore
 
 
-@pytest.fixture
-def mock_librus_client():
-    """Return a mock Librus client."""
-    client = MagicMock()
-    client.async_authenticate = AsyncMock(return_value=True)
-    client.async_get_grades = AsyncMock(return_value=[
-        {
-            'subject': 'Mathematyka',
-            'grade': '5',
-            'date': '2025-01-01',
-            'category': 'Test',
-            'teacher': 'Jan Kowalski',
-            'type': 'numeric'
-        }
-    ])
-    client.async_get_messages = AsyncMock(return_value=[])
-    return client
+async def test_domain_setup_registers_frontend_cards(hass: HomeAssistant) -> None:
+    """async_setup domenowy rejestruje static paths dla obu kart Lovelace."""
+    import custom_components.librus_apix as librus_module
 
+    mock_http = MagicMock()
+    mock_http.async_register_static_paths = AsyncMock()
 
-async def test_setup_entry(hass: HomeAssistant, mock_config_entry, mock_librus_client):
-    """Test the setup entry."""
-    with patch(
-        "custom_components.librus_apix.LibrusApiClient",
-        return_value=mock_librus_client
+    with (
+        patch.object(Path, "exists", return_value=True),
+        patch.object(hass, "http", mock_http, create=True),
+        patch("custom_components.librus_apix._async_ensure_lovelace_resource", new_callable=AsyncMock) as mock_ensure,
     ):
+        result = await librus_module.async_setup(hass, {})
+        await hass.async_block_till_done()
+
+    assert result is True
+    mock_http.async_register_static_paths.assert_called_once()
+    call_args = mock_http.async_register_static_paths.call_args[0][0]
+    registered_paths = {p.url_path for p in call_args}
+    assert "/librus_apix/librus-messages-card.js" in registered_paths
+    assert "/librus_apix/librus-grades-card.js" in registered_paths
+    assert "/librus_apix/librus-subject-grades-card.js" in registered_paths
+    assert mock_ensure.call_count == 3
+    ensure_urls = {call[0][1] for call in mock_ensure.call_args_list}
+    assert any(u.startswith("/librus_apix/librus-messages-card.js") and "?v=" in u for u in ensure_urls)
+    assert any(u.startswith("/librus_apix/librus-grades-card.js") and "?v=" in u for u in ensure_urls)
+    assert any(u.startswith("/librus_apix/librus-subject-grades-card.js") and "?v=" in u for u in ensure_urls)
+
+
+async def test_domain_setup_skips_registration_when_file_missing(hass: HomeAssistant) -> None:
+    """Gdy plik JS nie istnieje, rejestracja jest pomijana (graceful)."""
+    import custom_components.librus_apix as librus_module
+
+    mock_http = MagicMock()
+    mock_http.async_register_static_paths = AsyncMock()
+
+    with (
+        patch.object(Path, "exists", return_value=False),
+        patch.object(hass, "http", mock_http, create=True),
+        patch("custom_components.librus_apix._async_ensure_lovelace_resource", new_callable=AsyncMock) as mock_ensure,
+    ):
+        result = await librus_module.async_setup(hass, {})
+        await hass.async_block_till_done()
+
+    assert result is True
+    mock_http.async_register_static_paths.assert_not_called()
+    mock_ensure.assert_not_called()
+
+
+async def test_setup_and_unload(hass: HomeAssistant, mock_config_entry, mock_librus_client):
+    """Happy path: setup creates entities, unload removes them cleanly."""
+    mock_config_entry.add_to_hass(hass)
+
+    assert await hass.config_entries.async_setup(mock_config_entry.entry_id)
+    await hass.async_block_till_done()
+    assert mock_config_entry.state is ConfigEntryState.LOADED
+
+    # runtime_data should be populated and contain our coordinator + client.
+    assert mock_config_entry.runtime_data is not None
+    assert mock_config_entry.runtime_data.client is mock_librus_client
+
+    # Unload — runtime_data is cleaned by HA, state becomes NOT_LOADED.
+    assert await hass.config_entries.async_unload(mock_config_entry.entry_id)
+    await hass.async_block_till_done()
+    assert mock_config_entry.state is ConfigEntryState.NOT_LOADED
+
+
+async def test_setup_retries_on_auth_failure(hass: HomeAssistant, mock_config_entry):
+    """Auth fail → coordinator raises ConfigEntryNotReady, state SETUP_RETRY."""
+    from unittest.mock import AsyncMock, patch
+
+    mock_config_entry.add_to_hass(hass)
+
+    with patch(
+        "custom_components.librus_apix.LibrusApiClient", autospec=True
+    ) as client_cls:
+        instance = client_cls.return_value
+        instance.username = "test_user"
+        instance.async_authenticate = AsyncMock(return_value=False)
+
         result = await hass.config_entries.async_setup(mock_config_entry.entry_id)
-        assert result is True
+        await hass.async_block_till_done()
+
+    # async_setup returns False when ConfigEntryNotReady is raised internally.
+    assert result is False
+    assert mock_config_entry.state is ConfigEntryState.SETUP_RETRY
 
 
-async def test_unload_entry(hass: HomeAssistant, mock_config_entry, mock_librus_client):
-    """Test unloading an entry."""
+async def test_setup_uses_cache_skips_first_refresh(
+    hass: HomeAssistant, mock_config_entry, mock_librus_client
+) -> None:
+    """Gdy cache istnieje, first_refresh nie jest wywoływany — integracja startuje z danymi z cache."""
+    cached_data = {
+        "student_info": StudentInformation(
+            name="Jan Kowalski", class_name="5A", number=12,
+            tutor="Anna Nowak", school="SP 1", lucky_number=7,
+        ),
+        "grades": [],
+        "messages": [],
+        "grades_by_subject": {},
+        "upcoming_exams": [],
+        "schedule": [],
+        "timetable": [],
+        "attendance": [],
+        "attendance_frequency": {},
+        "attendance_by_subject": {},
+        "announcements": [],
+        "current_semester": 1,
+    }
+    saved_at = dt_util.utcnow()
+
     with patch(
-        "custom_components.librus_apix.LibrusApiClient",
-        return_value=mock_librus_client
-    ):
-        # Setup first
-        await hass.config_entries.async_setup(mock_config_entry.entry_id)
-        
-        # Then unload
-        result = await hass.config_entries.async_unload(mock_config_entry.entry_id)
-        assert result is True
+        "custom_components.librus_apix.LibrusDataStore",
+        autospec=True,
+    ) as store_cls:
+        store_instance = store_cls.return_value
+        store_instance.async_load = AsyncMock(return_value=(cached_data, saved_at))
+        store_instance.async_save = AsyncMock()
+
+        mock_config_entry.add_to_hass(hass)
+        assert await hass.config_entries.async_setup(mock_config_entry.entry_id)
+        await hass.async_block_till_done()
+
+    assert mock_config_entry.state is ConfigEntryState.LOADED
+
+    # first_refresh nie powinien być wywołany (coordinator.data pochodzi z cache)
+    coordinator = mock_config_entry.runtime_data.coordinator
+    assert coordinator.data is cached_data
+    # _first_run powinno być False (seed already done from cache)
+    assert coordinator._first_run is False

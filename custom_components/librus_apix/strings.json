@@ -8,6 +8,21 @@
           "username": "Username/Login",
           "password": "Password"
         }
+      },
+      "reauth_confirm": {
+        "title": "Re-authenticate Librus APIX",
+        "description": "Your Librus password no longer works for {username}. Enter the new password to restore the integration.",
+        "data": {
+          "password": "Password"
+        }
+      },
+      "reconfigure": {
+        "title": "Reconfigure Librus APIX",
+        "description": "Change your Librus Synergia credentials.",
+        "data": {
+          "username": "Username/Login",
+          "password": "Password"
+        }
       }
     },
     "error": {
@@ -15,7 +30,135 @@
       "unknown": "Unexpected error occurred"
     },
     "abort": {
-      "already_configured": "Device is already configured"
+      "already_configured": "Account is already configured",
+      "reauth_successful": "Re-authentication successful — integration reloaded.",
+      "reconfigure_successful": "Reconfiguration successful — integration reloaded.",
+      "account_mismatch": "The new username does not match this config entry. To use a different account, add it as a new integration."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Human-like sync settings",
+        "description": "Tune how the integration paces its synchronisations to look like a real user. Defaults are conservative and safe.",
+        "data": {
+          "base_minutes": "Base interval (minutes)",
+          "jitter": "Jitter fraction (0.0–0.5)",
+          "quiet_hours_enabled": "Skip syncs during quiet hours",
+          "quiet_start": "Quiet hours start (HH:MM)",
+          "quiet_end": "Quiet hours end (HH:MM)",
+          "off_school_multiplier": "Multiplier on weekends, holidays and breaks",
+          "humanize": "Enable human-like sync (off = legacy fixed cadence)",
+          "message_notify": "Show notification banner for new messages (persistent_notification)"
+        }
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "student_info": {
+        "name": "Student information"
+      },
+      "lucky_number": {
+        "name": "Lucky number"
+      },
+      "grades": {
+        "name": "Grades"
+      },
+      "overall_average": {
+        "name": "Overall average"
+      },
+      "messages": {
+        "name": "Messages"
+      },
+      "upcoming_exams": {
+        "name": "Upcoming exams"
+      },
+      "latest_grade": {
+        "name": "Latest grade"
+      },
+      "latest_message": {
+        "name": "Latest message"
+      },
+      "next_exam": {
+        "name": "Next exam"
+      },
+      "attendance_frequency": {
+        "name": "Attendance"
+      },
+      "absences": {
+        "name": "Absences"
+      },
+      "latest_absence": {
+        "name": "Latest absence"
+      },
+      "announcements": {
+        "name": "Announcements"
+      },
+      "latest_announcement": {
+        "name": "Latest announcement"
+      },
+      "last_refresh": {
+        "name": "Last refresh"
+      }
+    },
+    "calendar": {
+      "schedule": {
+        "name": "Schedule"
+      },
+      "timetable": {
+        "name": "Timetable"
+      },
+      "attendance": {
+        "name": "Attendance"
+      },
+      "grades_calendar": {
+        "name": "Grades"
+      }
+    },
+    "event": {
+      "new_grade": {
+        "name": "New grade"
+      },
+      "new_message": {
+        "name": "New message"
+      },
+      "new_exam": {
+        "name": "New exam"
+      },
+      "new_announcement": {
+        "name": "New announcement"
+      },
+      "new_absence": {
+        "name": "New absence"
+      }
+    }
+  },
+  "exceptions": {
+    "auth_failed": {
+      "message": "Authentication permanently failed — please re-enter password."
+    },
+    "invalid_entry": {
+      "message": "Config entry {entry_id} not found or not loaded."
+    },
+    "entry_not_initialized": {
+      "message": "Config entry is not fully initialized."
+    },
+    "message_not_found": {
+      "message": "Message with href {href} not found in current data."
+    },
+    "message_fetch_failed": {
+      "message": "Could not fetch content for message {href}. Librus may have changed its HTML structure."
+    }
+  },
+  "issues": {
+    "librus_lib_outdated": {
+      "title": "Librus parser may be outdated",
+      "description": "The Librus integration has been unable to fetch any data for {username} across multiple consecutive refreshes. This usually means Librus changed their HTML/CSS structure and the `librus-apix` library needs to be upgraded. Check the issue tracker for a newer release of the integration."
+    },
+    "auth_failed": {
+      "title": "Re-authentication required",
+      "description": "Authentication for {username} failed permanently. Home Assistant has started the re-authentication flow — open Settings → Devices & Services and enter the new Librus password to restore the integration."
     }
   }
 }
