@@ -28,7 +28,7 @@ from librus_apix import urls as librus_urls
 from librus_apix.announcements import get_announcements
 from librus_apix.attendance import get_attendance, get_attendance_frequency
 from librus_apix.client import Client, new_client
-from librus_apix.exceptions import TokenError
+from librus_apix.exceptions import MaintananceError, TokenError
 from librus_apix.grades import get_grades
 from librus_apix.messages import get_max_page_number, get_received
 from librus_apix.schedule import get_schedule
@@ -181,6 +181,14 @@ class LibrusAuthError(Exception):
     """
 
 
+class LibrusMaintenanceError(Exception):
+    """Raised when Librus is in scheduled maintenance (HTTP 503).
+
+    Raised instead of returning False from async_authenticate() so callers
+    can distinguish maintenance from bad credentials without a flag.
+    """
+
+
 _DESCRIPTIVE_DESC_KEYS = (
     "Ocena", "Przedmiot", "Obszar oceniania", "Umiejętność",
     "Data", "Nauczyciel", "Dodał", "Kategoria", "Poprawa oceny", "Komentarz",
@@ -289,6 +297,13 @@ class LibrusApiClient:
                 )
                 _LOGGER.debug("Authentication successful for %s", self.username)
                 return True
+            except MaintananceError as err:
+                _LOGGER.warning(
+                    "Librus is in maintenance mode for %s — will not trigger reauth",
+                    self.username,
+                )
+                self._reset_auth()
+                raise LibrusMaintenanceError("Librus maintenance") from err
             except Exception:
                 _LOGGER.exception("Authentication failed")
                 self._reset_auth()
@@ -314,7 +329,15 @@ class LibrusApiClient:
         for attempt in range(2):
             try:
                 if not self._client or not self._token:
-                    if not await self.async_authenticate():
+                    try:
+                        auth_ok = await self.async_authenticate()
+                    except LibrusMaintenanceError:
+                        _LOGGER.info(
+                            "Librus maintenance — skipping auth failure counter for %s",
+                            label,
+                        )
+                        return None
+                    if not auth_ok:
                         auth_failures += 1
                         if auth_failures >= 2:
                             raise LibrusAuthError(

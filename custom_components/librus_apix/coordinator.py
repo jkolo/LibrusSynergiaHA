@@ -425,7 +425,16 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         Called by HA on the first refresh. If Librus is in maintenance,
         ConfigEntryNotReady triggers HA's exponential-backoff retry.
         """
-        if not await self.client.async_authenticate():
+        from . import LibrusMaintenanceError
+
+        try:
+            auth_ok = await self.client.async_authenticate()
+        except LibrusMaintenanceError as err:
+            raise ConfigEntryNotReady(
+                f"Librus is in maintenance mode for {self.client.username}. "
+                "HA will retry automatically."
+            ) from err
+        if not auth_ok:
             raise ConfigEntryNotReady(
                 f"Failed to log in to Librus for {self.client.username} "
                 "(possible Librus maintenance). HA will retry automatically."
@@ -433,7 +442,7 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     async def _async_update_data(self) -> dict[str, Any]:
         """Fetch fresh data from the Librus API."""
-        from . import LibrusAuthError  # local import to avoid circular at module import
+        from . import LibrusAuthError, LibrusMaintenanceError  # local import to avoid circular at module import
 
         current_semester = 1 if date.today().month >= 9 else 2
 
@@ -667,6 +676,13 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 )
             return result
 
+        except LibrusMaintenanceError:
+            _LOGGER.warning(
+                "Librus maintenance detected during refresh — keeping cached data"
+            )
+            if self.data:
+                return self.data
+            raise UpdateFailed("Librus maintenance and no cached data")
         except LibrusAuthError as err:
             # Password likely changed in Librus — start reauth flow and
             # surface a repair issue so the user has a visible nudge in
