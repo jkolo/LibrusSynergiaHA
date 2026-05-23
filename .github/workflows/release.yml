@@ -8,6 +8,8 @@ jobs:
   build-and-attach:
     name: Build frontend and attach to release
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
 
