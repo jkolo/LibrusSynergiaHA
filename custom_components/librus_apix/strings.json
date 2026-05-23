@@ -145,10 +145,10 @@
       "message": "Config entry is not fully initialized."
     },
     "message_not_found": {
-      "message": "Message with href '{href}' not found in current data."
+      "message": "Message with href {href} not found in current data."
     },
     "message_fetch_failed": {
-      "message": "Could not fetch content for message '{href}'. Librus may have changed its HTML structure."
+      "message": "Could not fetch content for message {href}. Librus may have changed its HTML structure."
     }
   },
   "issues": {

@@ -59,6 +59,8 @@ _LOGGER = logging.getLogger(__name__)
 
 PLATFORMS = ["sensor", "calendar", "event"]
 
+CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
+
 _MESSAGES_CARD_PATH = "/librus_apix/librus-messages-card.js"
 _GRADES_CARD_PATH = "/librus_apix/librus-grades-card.js"
 _SUBJECT_GRADES_CARD_PATH = "/librus_apix/librus-subject-grades-card.js"
