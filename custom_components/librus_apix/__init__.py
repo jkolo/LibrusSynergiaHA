@@ -362,6 +362,7 @@ class LibrusApiClient:
 
             for subject_grades in numeric_grades:
                 for subject, grades_list in subject_grades.items():
+                    subject = " ".join(subject.split())
                     for grade in grades_list:
                         if grade.semester != current_sem:
                             continue
@@ -392,6 +393,7 @@ class LibrusApiClient:
 
             for subject_grades in descriptive_grades:
                 for subject, grades_list in subject_grades.items():
+                    subject = " ".join(subject.split())
                     for desc_grade in grades_list:
                         if desc_grade.semester != current_sem:
                             continue

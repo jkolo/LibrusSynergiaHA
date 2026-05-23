@@ -618,7 +618,7 @@ class LibrusSubjectGradesSensor(LibrusBaseEntity, SensorEntity):
         # list would truncate. We keep the grade count as state and the
         # full list in the "lista_ocen" attribute.
         grades = self._data().get("grades_by_subject", {}).get(self._subject, [])
-        return len(grades) if grades else None
+        return len(grades)
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
