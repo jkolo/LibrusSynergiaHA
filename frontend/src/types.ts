@@ -41,15 +41,24 @@ export interface HassGrade {
 
 export interface LibrusGradesCardConfig {
   type: string;
-  entities: string[];
+  /** Any entity of the student (e.g. the aggregate grades sensor); subject sensors on its device are discovered automatically. */
+  entity?: string;
+  entities?: string[];
   title?: string;
   only_recent?: boolean;
   sort_order?: "asc" | "desc";
   height?: number;
 }
 
+export interface HassEntityRegistryEntry {
+  entity_id: string;
+  device_id?: string | null;
+  platform?: string;
+}
+
 export interface HomeAssistant {
   states: Record<string, HassState>;
+  entities?: Record<string, HassEntityRegistryEntry>;
   callService(
     domain: string,
     service: string,
