@@ -131,52 +131,80 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     return True
 
 
-async def _async_ensure_lovelace_resource(hass: HomeAssistant, url: str) -> None:
-    """Dodaj lub zaktualizuj wpis karty Lovelace.
+# Karty rejestrowane sa rownolegle (async_create_task per karta); kazde
+# wywolanie robi load -> save na tym samym pliku lovelace_resources, wiec
+# bez blokady zapisy nadpisuja sie nawzajem.
+_LOVELACE_RESOURCES_LOCK = asyncio.Lock()
 
-    Dopasowuje po ścieżce (bez query string) — jeśli wpis istnieje z inną
-    wersją (np. ?v=3.5.0), podmienia go na nowy URL żeby wymusić reload JS.
+
+async def _async_ensure_lovelace_resource(hass: HomeAssistant, url: str) -> None:
+    """Serializuje _async_ensure_lovelace_resource_locked."""
+    async with _LOVELACE_RESOURCES_LOCK:
+        await _async_ensure_lovelace_resource_locked(hass, url)
+
+
+async def _async_ensure_lovelace_resource_locked(hass: HomeAssistant, url: str) -> None:
+    """Dodaj lub zaktualizuj wpis karty Lovelace — dokladnie jeden na sciezke.
+
+    Dopasowuje po sciezce (bez query string). Pierwszy pasujacy wpis dostaje
+    aktualny URL (?v=<wersja> wymusza reload JS), pozostale sa usuwane.
+    Duplikaty powodowaly, ze przegladarka ladowala kilka wersji karty,
+    customElements.define() rzucal wyjatek, a wygrywala przypadkowa
+    (czesto stara) wersja.
     """
     from homeassistant.helpers.storage import Store
 
     base_path = url.split("?")[0]
 
+    def _matches(item: dict) -> bool:
+        return item.get("url", "").split("?")[0] == base_path
+
     store = Store(hass, 1, "lovelace_resources", minor_version=1)
     data = await store.async_load() or {"items": []}
     items: list[dict] = data.setdefault("items", [])
 
-    existing = next(
-        (item for item in items if item.get("url", "").split("?")[0] == base_path),
-        None,
-    )
-    if existing:
-        if existing.get("url") == url:
-            return  # Ten sam URL+wersja — nic do roboty
-        existing["url"] = url  # Zaktualizuj wersję (cache bust)
-        _LOGGER.info("Updated Lovelace resource to %s", url)
-    else:
+    matching = [item for item in items if _matches(item)]
+    changed = False
+    if not matching:
         items.append({"id": uuid.uuid4().hex, "url": url, "type": "module"})
         _LOGGER.info("Registered Lovelace resource: %s (effective after browser reload)", url)
+        changed = True
+    else:
+        keep = matching[0]
+        if keep.get("url") != url:
+            keep["url"] = url  # Zaktualizuj wersje (cache bust)
+            _LOGGER.info("Updated Lovelace resource to %s", url)
+            changed = True
+        if len(matching) > 1:
+            data["items"] = [i for i in items if i is keep or not _matches(i)]
+            _LOGGER.info(
+                "Removed %d duplicate Lovelace resource(s) for %s",
+                len(matching) - 1, base_path,
+            )
+            changed = True
 
-    await store.async_save(data)
+    if changed:
+        await store.async_save(data)
 
-    # Powiadom na żywo aktywną kolekcję zasobów (działa gdy lovelace już skonfigurowane)
-    # hass.data["lovelace"] to LovelaceData (obiekt, nie dict) — używamy getattr
+    # Powiadom na zywo aktywna kolekcje zasobow (dziala gdy lovelace juz skonfigurowane)
+    # hass.data["lovelace"] to LovelaceData (obiekt, nie dict) — uzywamy getattr
     _lovelace_data = hass.data.get("lovelace")
     lovelace_resources = getattr(_lovelace_data, "resources", None) if _lovelace_data is not None else None
     if lovelace_resources is not None:
         try:
-            live_items = lovelace_resources.async_items()
-            live_existing = next(
-                (i for i in live_items if i.get("url", "").split("?")[0] == base_path),
-                None,
-            )
-            if live_existing is None:
+            live_matching = [i for i in lovelace_resources.async_items() if _matches(i)]
+            if not live_matching:
                 await lovelace_resources.async_create_item({"res_type": "module", "url": url})
-            elif live_existing.get("url") != url:
-                await lovelace_resources.async_update_item(
-                    live_existing["id"], {"res_type": "module", "url": url}
-                )
+            else:
+                # Zostaw wpis z aktualnym URL, jesli jest; inaczej zaktualizuj pierwszy.
+                keep = next((i for i in live_matching if i.get("url") == url), live_matching[0])
+                if keep.get("url") != url:
+                    await lovelace_resources.async_update_item(
+                        keep["id"], {"res_type": "module", "url": url}
+                    )
+                for dup in live_matching:
+                    if dup is not keep:
+                        await lovelace_resources.async_delete_item(dup["id"])
             _LOGGER.debug("Lovelace resource live-updated: %s", url)
         except Exception as exc:  # noqa: BLE001
             _LOGGER.debug("Could not update Lovelace resource live: %s", exc)

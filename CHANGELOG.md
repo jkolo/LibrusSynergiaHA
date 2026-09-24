@@ -18,6 +18,7 @@
 ### Naprawiono
 
 - **`librus-subject-grades-card` pokazywała entity_id zamiast nazwy przedmiotu w nagłówku.** Sensor przedmiotu wystawia teraz atrybut `subject`.
+- **Karty Librusa ładowane w kilku wersjach naraz.** Zasoby Lovelace zawierały duplikaty (`?v=3.8.0`, `?v=3.8.1`, `?v=4.0.0`), przeglądarka zgłaszała „has already been used with this registry”, a wygrywała przypadkowa, często stara wersja karty. Rejestracja zostawia teraz dokładnie jeden wpis na kartę i usuwa pozostałe.
 - **Akcje `list_messages` i `download_attachment` bez opisów.** Obie mają wpisy w `services.yaml`, więc w Narzędziach deweloperskich pokazują nazwy i pola.
 
 ### Synchronizacja z upstream
