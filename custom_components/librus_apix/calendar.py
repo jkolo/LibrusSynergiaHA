@@ -119,6 +119,10 @@ def _schedule_event_to_calendar_event(event_dict: dict) -> CalendarEvent | None:
 
     # Description: dodatkowe szczegoly
     desc_parts = []
+    if event_dict.get("description"):
+        desc_parts.append(f"Opis: {event_dict['description']}")
+    if event_dict.get("teacher"):
+        desc_parts.append(f"Nauczyciel: {event_dict['teacher']}")
     if category:
         desc_parts.append(f"Kategoria: {category}")
     if event_dict.get("day_label"):

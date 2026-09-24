@@ -57,6 +57,12 @@ T = TypeVar("T")
 
 _LOGGER = logging.getLogger(__name__)
 
+# Polskie nazwy dni tygodnia (date.weekday(): 0 = poniedzialek) — stala
+# zamiast strftime("%A"), ktore zalezy od locale kontenera HA.
+_WEEKDAYS_PL = (
+    "poniedziałek", "wtorek", "środa", "czwartek", "piątek", "sobota", "niedziela",
+)
+
 PLATFORMS = ["sensor", "calendar", "event"]
 
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
@@ -593,6 +599,12 @@ class LibrusApiClient:
                 if only_exams and not is_exam:
                     continue
 
+                # librus-apix wstawia literal "unknown" gdy tooltip nie ma pola.
+                details = {
+                    k: v for k, v in data_dict.items()
+                    if v and v != "unknown"
+                }
+
                 days_until = (event_date - today).days
                 upcoming.append({
                     "title": event.title,
@@ -601,6 +613,10 @@ class LibrusApiClient:
                     "date": event_date.isoformat(),
                     "hour": event.hour or "",
                     "day_label": event.day or "",
+                    "weekday": _WEEKDAYS_PL[event_date.weekday()],
+                    "description": details.get("Opis", ""),
+                    "teacher": details.get("Nauczyciel", ""),
+                    "details": details,
                     "lesson_number": event.number,
                     "href": event.href or "",
                     "days_until": days_until,

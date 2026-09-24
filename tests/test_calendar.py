@@ -19,6 +19,7 @@ from custom_components.librus_apix.calendar import (
     LibrusGradesCalendar,
     _attendance_to_calendar_event,
     _grade_to_calendar_event,
+    _schedule_event_to_calendar_event,
 )
 
 
@@ -291,6 +292,39 @@ def test_grade_to_event_is_full_day():
     assert ev is not None
     assert isinstance(ev.start, _date)
     assert ev.start.isoformat() == "2026-04-12"
+
+
+# ---------------------------------------------------------------------------
+# _schedule_event_to_calendar_event
+# ---------------------------------------------------------------------------
+
+
+def test_schedule_event_description_contains_opis_and_teacher():
+    ev = _schedule_event_to_calendar_event({
+        "date": "2026-10-02",
+        "title": "Sprawdzian",
+        "subject": "matematyka",
+        "event_type": "exam",
+        "description": "Funkcje liniowe",
+        "teacher": "Jan Kowalski",
+    })
+    assert ev is not None
+    assert "Opis: Funkcje liniowe" in ev.description
+    assert "Nauczyciel: Jan Kowalski" in ev.description
+
+
+def test_schedule_event_description_skips_empty_opis():
+    ev = _schedule_event_to_calendar_event({
+        "date": "2026-10-02",
+        "title": "Sprawdzian",
+        "subject": "matematyka",
+        "event_type": "exam",
+        "description": "",
+        "teacher": "",
+    })
+    assert ev is not None
+    assert "Opis:" not in ev.description
+    assert "Nauczyciel:" not in ev.description
 
 
 # ---------------------------------------------------------------------------
