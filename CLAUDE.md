@@ -60,24 +60,30 @@ W `.github/workflows/`: `hassfest.yml` (walidacja manifestu integracji HA) i `va
 
 ### Moduły
 
-- `__init__.py` — `async_setup_entry`, klasa **`LibrusApiClient`** (cienki wrapper na bibliotekę `librus-apix`).
-- `sensor.py` — koordynator i wszystkie sensory (oceny, średnie, wiadomości, zapowiedzi sprawdzianów, info o uczniu, szczęśliwy numerek).
-- `calendar.py` — dwa kalendarze per config entry: `Terminarz` (z tagami w summary) i `Plan Lekcji`.
+- `__init__.py` — `async_setup_entry`, serwisy, klasa **`LibrusApiClient`** (cienki wrapper na bibliotekę `librus-apix`, fetchery `async_get_*`).
+- `coordinator.py` — `LibrusDataUpdateCoordinator`: fetch w losowej kolejności, cache, kolejka `_pending_events`.
+- `sensor.py` — sensory (m.in. oceny, średnie, wiadomości, terminarz, zadania domowe, next_exam, frekwencja, per-przedmiot).
+- `calendar.py` — kalendarze per config entry: `Terminarz` (z tagami w summary), `Plan Lekcji`, `Obecności`, `Oceny`, `Zadania domowe`.
+- `event.py` — encje zdarzeń (`new_grade`, `new_message`, `new_exam`, `new_announcement`, `new_absence`, `new_homework`, `new_schedule_event`).
 - `config_flow.py` — UI do podawania login/hasło, weryfikuje przez próbne logowanie.
 - `const.py` — `DOMAIN = "librus_apix"`, `SCAN_INTERVAL = timedelta(hours=2)`.
 
-`PLATFORMS = ["sensor", "calendar"]`.
+`PLATFORMS = ["sensor", "calendar", "event"]`.
 
 ### Wzorzec koordynatora — KLUCZOWY
 
-W `__init__.async_setup_entry` tworzony jest **jeden** `LibrusDataUpdateCoordinator` (zdefiniowany w `sensor.py`), zapisany pod kluczem `f"{entry.entry_id}_coordinator"` w `hass.data[DOMAIN]`. Zarówno platforma `sensor`, jak i `calendar` **pobierają ten sam coordinator** — nie tworzą własnego. `sensor.py` ma fallback na lokalne tworzenie (legacy install), ale `calendar.py` zakłada, że już istnieje (rzuci `KeyError` jeśli nie). **Nie duplikuj fetcherów** — dodawaj nowe pola do słownika zwracanego przez `_async_update_data()` i konsumuj w nowych entity.
+W `__init__.async_setup_entry` tworzony jest **jeden** `LibrusDataUpdateCoordinator` (`coordinator.py`), zapisany w `entry.runtime_data.coordinator`. Wszystkie platformy **pobierają ten sam coordinator** — nie tworzą własnego. **Nie duplikuj fetcherów** — dodaj fetcher do słownika `fetchers` w `_async_update_data()`, nowe pole do zwracanego słownika i konsumuj je w encjach.
 
-Struktura `coordinator.data`:
+Struktura `coordinator.data` (klucze angielskie od v2.0):
 ```
-student_info, oceny, oceny_wg_przedmiotu, wiadomosci,
-zapowiedzi (filtr is_exam), terminarz (pełny, z is_day_off i event_type),
-plan_lekcji, semestr_biezacy
+student_info, grades, grades_by_subject, messages,
+upcoming_exams (schedule filtrowany is_exam — dla next_exam/new_exam),
+schedule (pełny terminarz: event_type, is_exam, is_day_off, description, teacher, weekday, details),
+timetable, attendance, attendance_frequency, attendance_by_subject,
+announcements, homework (30 dni, due_date ISO), current_semester
 ```
+
+Atrybuty sensorów muszą zmieścić się w **16 KB** (limit recordera) — listy wystawiaj w widoku kompaktowym, a dla dużych list przycinaj z flagą (wzór: `_attrs_schedule` → `events_truncated`). Pełne dane trzymaj w kalendarzu.
 
 ### Bibliotekę `librus-apix` wołaj przez executor
 
@@ -103,12 +109,13 @@ Librus ma okresowe przerwy (zwykle raz dziennie). Wzorzec:
 
 ### Eventy do automatyzacji
 
-Koordynator emituje na `hass.bus`:
-- `librus_apix_nowa_wiadomosc` (pola: `nadawca`, `temat`, `data`, `ma_zalacznik`)
-- `librus_apix_nowa_ocena` (`przedmiot`, `ocena`, `data`, `kategoria`, `nauczyciel`)
-- `librus_apix_nowa_zapowiedz` (`tytul`, `przedmiot`, `kategoria`, `data`, `godzina`, `dni_do`)
+Od v3.0 zdarzenia to **encje `event.*`** (`event.py`), nie `hass.bus`. Koordynator w `_enqueue_events` odkłada payload do `_pending_events[<klucz>]`, a encja zdarzenia zdejmuje go przez `consume_pending_event()`. Klucze: `new_message`, `new_grade`, `new_exam`, `new_announcement`, `new_absence`, `new_homework`, `new_schedule_event`. Wyjątek: `librus_apix_nowa_wiadomosc` nadal leci też na bus (flaga `initial`).
 
-**Pierwsze pobranie tylko zapamiętuje stan** w `_seen_message_hrefs` / `_seen_grade_ids` / `_seen_zapowiedzi_ids` (flaga `_first_run`). Bez tego po (re)starcie wystrzeliłyby duplikaty dla wszystkich istniejących elementów.
+**Pierwsze pobranie tylko zapamiętuje stan** w zbiorach `_seen_*` (LRU, `_seed_seen_sets_from_data`, flaga `_first_run`). Bez tego po (re)starcie wystrzeliłyby duplikaty dla wszystkich istniejących elementów. Nowa domena zdarzeń = nowy `_seen_*` + seed + pętla w `_enqueue_events`.
+
+### Zadania domowe
+
+`async_get_homework` używa tylko `get_homework` (lista) — **nie wołaj `homework_detail`**. Daty z Librusa to sklejone komórki („2026-10-02 piątek”) — parsuj przez `_parse_librus_date`. Przy błędzie coordinator zostawia poprzednią listę z cache.
 
 ### Privacy: nie pobieraj treści wiadomości
 
@@ -116,7 +123,7 @@ Koordynator emituje na `hass.bus`:
 
 ### Klasyfikacja eventów terminarza
 
-`async_get_schedule_events` heurystyką klasyfikuje event do `event_type ∈ {sprawdzian, kartkowka, praca_klasowa, praca_kontrolna, wypracowanie_klasowe, test, dzien_wolny, inne}` po słowach kluczowych w `title + Kategoria + Typ` oraz fragmentach w `href`. `is_exam` to disjunction pierwszych sześciu. `is_day_off` zawiera m.in. „dzień wolny" i `href` zawierający `wolne`/`szczegoly_wolne`. Calendar `Terminarz` zamienia `event_type` na prefix `[TAG]` w summary (zobacz `EVENT_TYPE_TAGS` w `calendar.py`) — to umożliwia użytkownikom filtrowanie po regexie w automatyzacjach.
+`async_get_schedule_events` heurystyką klasyfikuje event do `event_type ∈ {exam, quiz, class_test, assessment, essay_test, test, day_off, other}` po słowach kluczowych w `title + Kategoria + Typ` oraz fragmentach w `href`. `is_exam` to disjunction pierwszych sześciu. `is_day_off` zawiera m.in. „dzień wolny" i `href` zawierający `wolne`/`szczegoly_wolne`. Z `Event.data` (tooltip Librusa) wyciąga `description` (`Opis`) i `teacher` (`Nauczyciel`); literal `"unknown"` z biblioteki zamienia na pusty string. Calendar `Terminarz` zamienia `event_type` na prefix `[TAG]` w summary (zobacz `EVENT_TYPE_TAGS` w `calendar.py`) — to umożliwia użytkownikom filtrowanie po regexie w automatyzacjach.
 
 ## Konwencje
 
