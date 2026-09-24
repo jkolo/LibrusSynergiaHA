@@ -1,6 +1,7 @@
 import { LitElement, html, css, nothing } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
 import type { HassGrade, HomeAssistant, LibrusGradesCardConfig } from "./types.js";
+import { resolveGradeEntities } from "./grades-discovery.js";
 
 function parseDateForSort(dateStr: string): number {
   if (/^\d{2}\.\d{2}\.\d{4}$/.test(dateStr)) {
@@ -48,8 +49,8 @@ export class LibrusGradesCard extends LitElement {
   }
 
   setConfig(config: LibrusGradesCardConfig): void {
-    if (!config.entities || !Array.isArray(config.entities)) {
-      throw new Error("entities (lista sensorów per-przedmiot) jest wymagana");
+    if (!config.entity && !Array.isArray(config.entities)) {
+      throw new Error("wymagane entity (dowolna encja ucznia) lub entities (lista sensorów per-przedmiot)");
     }
     this._config = config;
   }
@@ -61,7 +62,7 @@ export class LibrusGradesCard extends LitElement {
   private get _grades(): HassGrade[] {
     if (!this.hass || !this._config) return [];
     const all: HassGrade[] = [];
-    for (const entityId of this._config.entities) {
+    for (const entityId of resolveGradeEntities(this.hass, this._config)) {
       const state = this.hass.states[entityId];
       const details = state?.attributes?.grade_details as HassGrade[] | undefined;
       if (details) all.push(...details);

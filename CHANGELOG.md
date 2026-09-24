@@ -13,6 +13,7 @@
 - **Zadania domowe.** Sensor `sensor.librus_<dziecko>_zadania_domowe` (zadania z terminem w najbliższych 30 dniach; atrybuty `homework`, `by_subject`, `due_in_3_days`, `due_in_7_days`) i kalendarz `calendar.librus_<dziecko>_zadania_domowe` (wpisy całodniowe w dniu terminu). Integracja pobiera tylko listę zadań, nie otwiera szczegółów.
 - **Nowe encje zdarzeń:** `new_homework` (nowe zadanie domowe) i `new_schedule_event` (każdy nowy wpis w terminarzu, nie tylko sprawdzian).
 - README: przykładowe karty terminarza, sprawdzianów i zadań domowych.
+- **Karta `librus-grades-card` sama wykrywa przedmioty.** Zamiast listy `entities` wystarczy `entity:` z dowolną encją ucznia (np. `sensor.librus_<dziecko>_grades`). Karta zbiera wszystkie sensory z `grade_details` z tego samego urządzenia. Stała lista psuła się przy zmianie przedmiotów (np. przejście z edukacji wczesnoszkolnej do klasy 4) i karta zostawała pusta, mimo że oceny były w HA. `entities` nadal działa i jest dołączane do wykrytych encji.
 
 ### Naprawiono
 
