@@ -19,6 +19,7 @@ from custom_components.librus_apix.calendar import (
     LibrusGradesCalendar,
     _attendance_to_calendar_event,
     _grade_to_calendar_event,
+    _homework_to_calendar_event,
     _schedule_event_to_calendar_event,
 )
 
@@ -343,11 +344,48 @@ def test_attendance_tags_cover_all_known_symbols():
 # ---------------------------------------------------------------------------
 
 
-async def test_setup_entry_creates_four_calendars(
+# ---------------------------------------------------------------------------
+# _homework_to_calendar_event
+# ---------------------------------------------------------------------------
+
+
+def _hw(**kw):
+    base = {
+        "subject": "matematyka", "category": "Zadanie domowe",
+        "teacher": "Jan Kowalski", "lesson": "Funkcje liniowe",
+        "task_date": "2026-09-25", "due_date": "2026-10-02",
+        "due_date_raw": "2026-10-02 piątek", "days_until": 7, "href": "1",
+    }
+    base.update(kw)
+    return base
+
+
+def test_homework_to_event_is_all_day_on_due_date():
+    from datetime import date
+
+    ev = _homework_to_calendar_event(_hw())
+    assert ev is not None
+    assert ev.start == date(2026, 10, 2)
+    assert ev.end == date(2026, 10, 3)
+    assert ev.summary == "📚 [ZADANIE] matematyka — Zadanie domowe"
+
+
+def test_homework_to_event_description_has_context():
+    ev = _homework_to_calendar_event(_hw())
+    assert "Temat: Funkcje liniowe" in ev.description
+    assert "Nauczyciel: Jan Kowalski" in ev.description
+    assert "Zadane: 2026-09-25" in ev.description
+
+
+def test_homework_without_due_date_returns_none():
+    assert _homework_to_calendar_event(_hw(due_date=None)) is None
+
+
+async def test_setup_entry_creates_five_calendars(
     hass: HomeAssistant, mock_librus_client, mock_config_entry
 ):
-    """Setup integracji rejestruje 4 calendar entities per config entry:
-    terminarz, plan_lekcji, obecnosci (NEW), oceny (NEW)."""
+    """Setup integracji rejestruje 5 calendar entities per config entry:
+    terminarz, plan_lekcji, obecnosci, oceny, zadania (v4.0)."""
     from homeassistant.helpers import entity_registry as er
 
     mock_config_entry.add_to_hass(hass)
@@ -364,4 +402,5 @@ async def test_setup_entry_creates_four_calendars(
     assert f"{mock_config_entry.entry_id}_calendar_plan_lekcji" in unique_ids
     assert f"{mock_config_entry.entry_id}_calendar_obecnosci" in unique_ids
     assert f"{mock_config_entry.entry_id}_calendar_oceny" in unique_ids
-    assert len(calendar_entries) == 4
+    assert f"{mock_config_entry.entry_id}_calendar_zadania" in unique_ids
+    assert len(calendar_entries) == 5

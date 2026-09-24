@@ -212,6 +212,40 @@ def _attrs_schedule(data: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+# Pola zadania domowego wystawiane w atrybutach (bez href/due_date_raw).
+_HOMEWORK_ATTR_FIELDS = (
+    "subject", "category", "teacher", "lesson", "task_date", "due_date",
+    "days_until",
+)
+
+
+def _val_homework_count(data: dict[str, Any]) -> StateType:
+    """Number of homework items due in the fetched window (30 days)."""
+    return len(data.get("homework") or [])
+
+
+def _attrs_homework(data: dict[str, Any]) -> dict[str, Any]:
+    items = data.get("homework") or []
+    by_subject: dict[str, int] = {}
+    for h in items:
+        subj = h.get("subject", "")
+        by_subject[subj] = by_subject.get(subj, 0) + 1
+
+    def _due_within(days: int) -> int:
+        return sum(
+            1 for h in items
+            if h.get("days_until") is not None and h["days_until"] <= days
+        )
+
+    return {
+        "homework": [{k: h.get(k) for k in _HOMEWORK_ATTR_FIELDS} for h in items],
+        "count": len(items),
+        "by_subject": by_subject,
+        "due_in_3_days": _due_within(3),
+        "due_in_7_days": _due_within(7),
+    }
+
+
 def _parse_grade_date(date_str: str) -> date | None:
     """Parse a Librus date string in either ISO or DD.MM.YYYY format."""
     if not date_str:
@@ -528,6 +562,14 @@ SENSORS: tuple[LibrusSensorEntityDescription, ...] = (
         state_class=SensorStateClass.MEASUREMENT,
         value_fn=_val_schedule_count,
         attrs_fn=_attrs_schedule,
+    ),
+    LibrusSensorEntityDescription(
+        key="zadania",
+        translation_key="homework",
+        icon="mdi:book-open-page-variant",
+        state_class=SensorStateClass.MEASUREMENT,
+        value_fn=_val_homework_count,
+        attrs_fn=_attrs_homework,
     ),
     # ---- v3.0 NEW: latest_/next_ sensors ----
     LibrusSensorEntityDescription(

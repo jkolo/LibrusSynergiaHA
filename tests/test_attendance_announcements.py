@@ -130,6 +130,7 @@ def fake_client_with_attendance(mock_student_info):
             "is_excused": False, "is_late": True, "is_release": False,
         },
     ])
+    client.async_get_homework = AsyncMock(return_value=[])
     client.async_get_announcements = AsyncMock(return_value=[
         {
             "title": "Wycieczka do Krakowa",

@@ -10,6 +10,7 @@ from custom_components.librus_apix.sensor import (
     _attrs_absences,
     _attrs_announcements,
     _attrs_frequency,
+    _attrs_homework,
     _attrs_latest_absence,
     _attrs_latest_announcement,
     _attrs_latest_grade,
@@ -20,6 +21,7 @@ from custom_components.librus_apix.sensor import (
     _val_absences_count,
     _val_announcements_count,
     _val_frequency,
+    _val_homework_count,
     _val_latest_absence,
     _val_latest_announcement,
     _val_latest_grade,
@@ -322,6 +324,38 @@ class TestScheduleSensor:
         assert len(desc) == 150
         assert desc.endswith("…")
         assert attrs["events_truncated"] is False
+
+
+def _hw(subject="Matematyka", days_until=2, due="2026-10-02"):
+    return {
+        "subject": subject, "category": "Zadanie domowe", "teacher": "Anna",
+        "lesson": "Funkcje", "task_date": "2026-09-25", "due_date": due,
+        "due_date_raw": f"{due} piątek", "days_until": days_until, "href": "9",
+    }
+
+
+class TestHomeworkSensor:
+    def test_state_is_count(self):
+        assert _val_homework_count({"homework": [_hw(), _hw()]}) == 2
+        assert _val_homework_count({}) == 0
+
+    def test_attrs(self):
+        data = {"homework": [
+            _hw(days_until=1),
+            _hw("Polski", days_until=5),
+            _hw(days_until=12),
+            _hw("Polski", days_until=None, due=None),
+        ]}
+        attrs = _attrs_homework(data)
+        assert attrs["count"] == 4
+        assert attrs["by_subject"] == {"Matematyka": 2, "Polski": 2}
+        assert attrs["due_in_3_days"] == 1
+        assert attrs["due_in_7_days"] == 2
+        item = attrs["homework"][0]
+        assert item["subject"] == "Matematyka"
+        assert item["due_date"] == "2026-10-02"
+        assert "href" not in item
+        assert "due_date_raw" not in item
 
 
 # ---------------------------------------------------------------------------

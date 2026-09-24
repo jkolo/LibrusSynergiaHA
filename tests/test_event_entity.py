@@ -39,6 +39,7 @@ def fake_client_with_messages(mock_student_info):
     client.async_get_schedule_events = AsyncMock(return_value=[])
     client.async_get_timetable_events = AsyncMock(return_value=[])
     client.async_get_attendance = AsyncMock(return_value=[])
+    client.async_get_homework = AsyncMock(return_value=[])
     client.async_get_announcements = AsyncMock(return_value=[])
     return client
 
@@ -113,8 +114,9 @@ async def test_new_grade_creates_pending_event(
 async def test_event_entities_exist_after_setup(
     hass: HomeAssistant, mock_librus_client, mock_config_entry
 ):
-    """Po setup integracji w entity_registry istnieje 5 event entities,
-    po jednym dla kazdego klucza (new_grade/_message/_exam/_announcement/_absence)."""
+    """Po setup integracji w entity_registry istnieje 7 event entities,
+    po jednym dla kazdego klucza (new_grade/_message/_exam/_announcement/
+    _absence/_homework/_schedule_event)."""
     from homeassistant.helpers import entity_registry as er
 
     mock_config_entry.add_to_hass(hass)
@@ -124,6 +126,7 @@ async def test_event_entities_exist_after_setup(
     expected_keys = (
         "new_grade", "new_message", "new_exam",
         "new_announcement", "new_absence",
+        "new_homework", "new_schedule_event",
     )
     registry = er.async_get(hass)
     event_entries = [
@@ -136,7 +139,7 @@ async def test_event_entities_exist_after_setup(
         assert expected_uid in unique_ids, (
             f"event entity z unique_id={expected_uid} powinno istniec po setup"
         )
-    assert len(event_entries) == 5
+    assert len(event_entries) == 7
 
 
 # ---------------------------------------------------------------------------

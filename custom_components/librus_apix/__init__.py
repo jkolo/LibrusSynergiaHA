@@ -31,6 +31,7 @@ from librus_apix.attendance import get_attendance, get_attendance_frequency
 from librus_apix.client import Client, new_client
 from librus_apix.exceptions import MaintananceError, TokenError
 from librus_apix.grades import get_grades
+from librus_apix.homework import get_homework
 from librus_apix.messages import get_max_page_number, get_received
 from librus_apix.schedule import get_schedule
 from librus_apix.student_information import get_student_information
@@ -57,6 +58,25 @@ from .humanize import build_headers, pick_user_agent
 T = TypeVar("T")
 
 _LOGGER = logging.getLogger(__name__)
+
+_ISO_DATE_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
+_PL_DATE_RE = re.compile(r"\d{2}\.\d{2}\.\d{4}")
+
+
+def _parse_librus_date(text: str) -> _date | None:
+    """Wyciagnij date z tekstu Librusa ("2026-10-02 piątek", "02.10.2026")."""
+    if m := _ISO_DATE_RE.search(text or ""):
+        try:
+            return _date.fromisoformat(m.group())
+        except ValueError:
+            return None
+    if m := _PL_DATE_RE.search(text or ""):
+        try:
+            return _dt.strptime(m.group(), "%d.%m.%Y").date()
+        except ValueError:
+            return None
+    return None
+
 
 # Polskie nazwy dni tygodnia (date.weekday(): 0 = poniedzialek) — stala
 # zamiast strftime("%A"), ktore zalezy od locale kontenera HA.
@@ -630,6 +650,44 @@ class LibrusApiClient:
             return upcoming
 
         return await self._with_retry("schedule", _work)
+
+    async def async_get_homework(
+        self, days_ahead: int = 30
+    ) -> list[dict[str, Any]] | None:
+        """Pobierz liste zadan domowych z terminem w najblizszych `days_ahead` dniach.
+
+        Tylko lista (get_homework) — NIE wolamy homework_detail, zeby nie
+        generowac dodatkowego ruchu ani sladow otwierania szczegolow.
+
+        Returns:
+            Lista dictow: subject, category, teacher, lesson, task_date,
+            due_date (ISO lub None), due_date_raw, days_until, href —
+            posortowana po due_date (None na koncu).
+        """
+        today = _date.today()
+        date_from = today.isoformat()
+        date_to = (today + timedelta(days=days_ahead)).isoformat()
+
+        def _work(client: Client) -> list[dict[str, Any]]:
+            result: list[dict[str, Any]] = []
+            for hw in get_homework(client, date_from, date_to):
+                due = _parse_librus_date(hw.completion_date)
+                task = _parse_librus_date(hw.task_date)
+                result.append({
+                    "subject": hw.subject,
+                    "category": hw.category,
+                    "teacher": hw.teacher,
+                    "lesson": hw.lesson,
+                    "task_date": task.isoformat() if task else hw.task_date,
+                    "due_date": due.isoformat() if due else None,
+                    "due_date_raw": hw.completion_date,
+                    "days_until": (due - today).days if due else None,
+                    "href": hw.href,
+                })
+            result.sort(key=lambda h: (h["due_date"] is None, h["due_date"] or ""))
+            return result
+
+        return await self._with_retry("homework", _work)
 
     async def async_get_timetable_events(
         self, weeks_ahead: int = 2
