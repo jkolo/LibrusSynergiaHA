@@ -862,6 +862,13 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     "is_late": bool(att.get("is_late", False)),
                 }
 
+        # Cache sprzed v4.0 nie ma klucza "homework" — seen-set jest pusty,
+        # wiec pierwsza lista tylko seeduje (bez eventow), jak przy _first_run.
+        if "homework" not in (self.data or {}):
+            for hw in homework:
+                _add_lru(self._seen_homework_keys, _homework_key(hw))
+            homework = []
+
         for hw in homework:
             hw_key = _homework_key(hw)
             if hw_key not in self._seen_homework_keys:

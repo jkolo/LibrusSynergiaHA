@@ -591,3 +591,30 @@ async def test_homework_none_keeps_cached(hass: HomeAssistant, fake_client):
     await hass.async_block_till_done()
 
     assert coordinator.data["homework"] == [_homework()]
+
+
+async def test_upgrade_cache_without_homework_does_not_fire(
+    hass: HomeAssistant, fake_client
+):
+    """Po aktualizacji z v3.x cache nie ma klucza `homework` — pierwsza
+    lista zadań ma być tylko zapamiętana, bez eventu new_homework."""
+    fake_client.async_get_homework = AsyncMock(return_value=[_homework()])
+    coordinator = LibrusDataUpdateCoordinator(hass, fake_client)
+    # Symulacja cache-first startu z danymi v3.x (bez "homework").
+    coordinator.data = {"grades": [], "messages": [], "schedule": []}
+    coordinator._seed_seen_sets_from_data(coordinator.data)
+    coordinator._first_run = False
+
+    await coordinator.async_refresh()
+    await hass.async_block_till_done()
+
+    assert coordinator.consume_pending_event("new_homework") is None
+    assert coordinator.data["homework"] == [_homework()]
+
+    # Kolejne nowe zadanie już normalnie emituje event.
+    fake_client.async_get_homework = AsyncMock(
+        return_value=[_homework(), _homework("Polski", "2026-10-03")]
+    )
+    await coordinator.async_refresh()
+    await hass.async_block_till_done()
+    assert coordinator.consume_pending_event("new_homework")["subject"] == "Polski"
