@@ -71,8 +71,8 @@
       "messages": {
         "name": "Messages"
       },
-      "upcoming_exams": {
-        "name": "Upcoming exams"
+      "schedule": {
+        "name": "Schedule"
       },
       "latest_grade": {
         "name": "Latest grade"

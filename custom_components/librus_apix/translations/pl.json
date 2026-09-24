@@ -71,8 +71,8 @@
       "messages": {
         "name": "Wiadomości"
       },
-      "upcoming_exams": {
-        "name": "Zapowiedzi"
+      "schedule": {
+        "name": "Terminarz"
       },
       "latest_grade": {
         "name": "Ostatnia ocena"

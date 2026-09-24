@@ -22,6 +22,7 @@ from homeassistant.const import CONF_PASSWORD, CONF_USERNAME
 from homeassistant.core import HomeAssistant, ServiceCall, SupportsResponse
 from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers import config_validation as cv
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.event import async_call_later
 from homeassistant.util import dt as dt_util
 from librus_apix import urls as librus_urls
@@ -1173,12 +1174,32 @@ async def async_setup_entry(hass: HomeAssistant, entry: LibrusConfigEntry) -> bo
 
     entry.runtime_data = LibrusRuntimeData(client=client, coordinator=coordinator)
 
+    _remove_obsolete_entities(hass, entry)
     _setup_services(hass)
     entry.async_on_unload(entry.add_update_listener(_async_options_updated))
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
     return True
+
+
+# unique_id suffixes of entities dropped in past releases. Stale registry
+# entries would otherwise linger forever as "unavailable".
+_OBSOLETE_ENTITY_SUFFIXES: tuple[tuple[str, str], ...] = (
+    ("sensor", "zapowiedzi"),  # v4.0: replaced by sensor.terminarz
+)
+
+
+def _remove_obsolete_entities(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Remove registry entries of entities no longer provided by the integration."""
+    registry = er.async_get(hass)
+    for platform, suffix in _OBSOLETE_ENTITY_SUFFIXES:
+        entity_id = registry.async_get_entity_id(
+            platform, DOMAIN, f"{entry.entry_id}_{suffix}"
+        )
+        if entity_id is not None:
+            _LOGGER.info("Removing obsolete entity %s", entity_id)
+            registry.async_remove(entity_id)
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: LibrusConfigEntry) -> bool:

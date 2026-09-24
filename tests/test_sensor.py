@@ -16,7 +16,7 @@ from custom_components.librus_apix.sensor import (
     _attrs_latest_message,
     _attrs_messages,
     _attrs_next_exam,
-    _attrs_upcoming_exams,
+    _attrs_schedule,
     _val_absences_count,
     _val_announcements_count,
     _val_frequency,
@@ -25,6 +25,7 @@ from custom_components.librus_apix.sensor import (
     _val_latest_grade,
     _val_latest_message,
     _val_next_exam,
+    _val_schedule_count,
     _val_unread_count,
 )
 
@@ -250,22 +251,77 @@ class TestAttrsNextExam:
         assert attrs["hour"] == "10:30"
 
 
-class TestUpcomingExamsAttrsCleanup:
-    """BREAKING change: next_* atrybuty znikły z sensora `zapowiedzi`."""
+def _sched(**kw):
+    base = {
+        "date": "2026-10-02", "weekday": "piątek", "title": "Sprawdzian",
+        "subject": "matematyka", "category": "Sprawdzian", "description": "",
+        "teacher": "", "hour": "", "lesson_number": 3, "event_type": "exam",
+        "is_exam": True, "is_day_off": False, "days_until": 2,
+        "day_label": "2", "href": "terminarz/szczegoly/1",
+        "details": {"Opis": "x"},
+    }
+    base.update(kw)
+    return base
 
-    def test_no_next_keys_in_attrs(self):
-        data = {"upcoming_exams": [
-            {"days_until": 2, "subject": "Mat", "title": "Funkcje",
-             "category": "Sprawdzian", "date": "2026-04-17", "hour": "10:30"},
+
+class TestScheduleSensor:
+    """sensor.terminarz zastępuje sensor.zapowiedzi (v4.0, BREAKING)."""
+
+    def test_state_is_count_of_all_events(self):
+        data = {"schedule": [_sched(), _sched(event_type="day_off", is_exam=False)]}
+        assert _val_schedule_count(data) == 2
+
+    def test_state_zero_when_missing(self):
+        assert _val_schedule_count({}) == 0
+
+    def test_attrs_compact_events_without_href_and_details(self):
+        attrs = _attrs_schedule({"schedule": [_sched(description="Funkcje")]})
+        ev = attrs["events"][0]
+        assert ev["description"] == "Funkcje"
+        assert ev["weekday"] == "piątek"
+        assert ev["is_exam"] is True
+        assert "href" not in ev
+        assert "details" not in ev
+        assert "day_label" not in ev
+
+    def test_attrs_counts_by_type_and_exam_windows(self):
+        data = {"schedule": [
+            _sched(days_until=1),
+            _sched(days_until=5, event_type="quiz"),
+            _sched(days_until=10),
+            _sched(days_until=20),
+            _sched(days_until=0, event_type="day_off", is_exam=False),
         ]}
-        attrs = _attrs_upcoming_exams(data)
-        for key in ("next_date", "next_subject", "next_title",
-                    "next_category", "next_days_until"):
-            assert key not in attrs, f"{key} should be removed in v3.0"
-        # Aggregate counts pozostają.
-        assert "exams" in attrs
-        assert "count_in_3_days" in attrs
-        assert "total_count" in attrs
+        attrs = _attrs_schedule(data)
+        assert attrs["count"] == 5
+        assert attrs["by_type"] == {"exam": 3, "quiz": 1, "day_off": 1}
+        assert attrs["exams_in_3_days"] == 1
+        assert attrs["exams_in_7_days"] == 2
+        assert attrs["exams_in_14_days"] == 3
+        assert attrs["exams_total"] == 4
+
+    def test_attrs_fit_recorder_limit(self):
+        """HA recorder odrzuca atrybuty > 16 KB — 60 wpisów z długim opisem."""
+        import json
+
+        data = {"schedule": [
+            _sched(description="x" * 200, teacher="Jan Kowalski")
+            for _ in range(60)
+        ]}
+        attrs = _attrs_schedule(data)
+        size = len(json.dumps(attrs, ensure_ascii=False).encode())
+        assert size < 16_000
+        # Liczniki zawsze liczą całość, lista jest przycięta z flagą.
+        assert attrs["count"] == 60
+        assert attrs["events_truncated"] is True
+        assert 0 < len(attrs["events"]) < 60
+
+    def test_long_description_is_shortened(self):
+        attrs = _attrs_schedule({"schedule": [_sched(description="y" * 500)]})
+        desc = attrs["events"][0]["description"]
+        assert len(desc) == 150
+        assert desc.endswith("…")
+        assert attrs["events_truncated"] is False
 
 
 # ---------------------------------------------------------------------------
