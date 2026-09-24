@@ -70,6 +70,7 @@ async def async_setup_entry(
         LibrusTimetableCalendar(coordinator, config_entry),
         LibrusAttendanceCalendar(coordinator, config_entry),
         LibrusGradesCalendar(coordinator, config_entry),
+        LibrusHomeworkCalendar(coordinator, config_entry),
     ])
 
 
@@ -119,6 +120,10 @@ def _schedule_event_to_calendar_event(event_dict: dict) -> CalendarEvent | None:
 
     # Description: dodatkowe szczegoly
     desc_parts = []
+    if event_dict.get("description"):
+        desc_parts.append(f"Opis: {event_dict['description']}")
+    if event_dict.get("teacher"):
+        desc_parts.append(f"Nauczyciel: {event_dict['teacher']}")
     if category:
         desc_parts.append(f"Kategoria: {category}")
     if event_dict.get("day_label"):
@@ -292,6 +297,37 @@ def _grade_to_calendar_event(raw: dict) -> CalendarEvent | None:
     )
 
 
+def _homework_to_calendar_event(raw: dict) -> CalendarEvent | None:
+    """Konwertuj zadanie domowe na full-day CalendarEvent w dniu terminu."""
+    due_iso = raw.get("due_date")
+    if not due_iso:
+        return None
+    try:
+        due = _date.fromisoformat(due_iso)
+    except ValueError:
+        return None
+
+    parts = [raw.get("subject") or "(brak przedmiotu)"]
+    if raw.get("category"):
+        parts.append(raw["category"])
+    summary = f"📚 [ZADANIE] {' — '.join(parts)}"
+
+    desc_parts: list[str] = []
+    if raw.get("lesson"):
+        desc_parts.append(f"Temat: {raw['lesson']}")
+    if raw.get("teacher"):
+        desc_parts.append(f"Nauczyciel: {raw['teacher']}")
+    if raw.get("task_date"):
+        desc_parts.append(f"Zadane: {raw['task_date']}")
+
+    return CalendarEvent(
+        start=due,
+        end=due + timedelta(days=1),
+        summary=summary,
+        description="\n".join(desc_parts),
+    )
+
+
 class LibrusBaseCalendar(LibrusBaseEntity, CalendarEntity):
     """Base class for Librus calendar entities."""
 
@@ -429,3 +465,20 @@ class LibrusGradesCalendar(LibrusBaseCalendar):
 
     def _convert(self, raw: dict) -> CalendarEvent | None:
         return _grade_to_calendar_event(raw)
+
+
+class LibrusHomeworkCalendar(LibrusBaseCalendar):
+    """Calendar of homework — each item as a full-day event on its due date."""
+
+    _attr_translation_key = "homework"
+    _attr_icon = "mdi:book-open-page-variant"
+
+    def __init__(self, coordinator, config_entry: ConfigEntry) -> None:
+        super().__init__(coordinator, config_entry)
+        self._attr_unique_id = f"{config_entry.entry_id}_calendar_zadania"
+
+    def _all_events(self) -> list[dict]:
+        return (self.coordinator.data or {}).get("homework") or []
+
+    def _convert(self, raw: dict) -> CalendarEvent | None:
+        return _homework_to_calendar_event(raw)

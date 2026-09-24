@@ -23,6 +23,8 @@ Integracja tworzy następujące sensory:
 | `sensor.librus_oceny` | Wszystkie oceny bieżącego semestru | liczba ocen |
 | `sensor.librus_srednia_ocen` | **Globalna średnia** ze wszystkich przedmiotów | float (wykres 📈) |
 | `sensor.librus_wiadomosci` | Ostatnie 5 wiadomości z pełną treścią | liczba nieprzeczytanych |
+| `sensor.librus_terminarz` | Nadchodzące wpisy terminarza (sprawdziany, dni wolne, wycieczki…) z opisem i nauczycielem | liczba wpisów |
+| `sensor.librus_zadania_domowe` | Zadania domowe z terminem w najbliższych 30 dniach | liczba zadań |
 | `sensor.librus_<przedmiot>` | Oceny z danego przedmiotu (np. `sensor.librus_matematyka`) | lista ocen: "4, 3+, 5" |
 | `sensor.librus_srednia_<przedmiot>` | **Średnia** z danego przedmiotu (np. `sensor.librus_srednia_matematyka`) | float (wykres 📈) |
 
@@ -178,6 +180,57 @@ Legenda ikon:
 - 🔴 czerwona = nieprzeczytana
 - ⚫ szara = przeczytana
 - 📎 badge = ma załącznik
+
+### Karta terminarza (wszystkie wpisy)
+
+> Znajdź nazwę encji w **Developer Tools → States** (szukaj `terminarz`).
+
+```yaml
+type: markdown
+title: 📅 Terminarz
+content: |
+  {% set events = state_attr('sensor.librus_imie_nazwisko_terminarz', 'events') %}
+  {% if events %}
+  | Data | Dzień | Typ | Przedmiot | Opis |
+  |------|-------|-----|-----------|------|
+  {% for e in events %}| **{{ e.date }}** | {{ e.weekday }} | {{ e.title }} | {{ e.subject }} | {{ e.description }} |
+  {% endfor %}
+  {% else %}Brak nadchodzących wpisów.{% endif %}
+```
+
+### Karta sprawdzianów i kartkówek (bez dni wolnych)
+
+```yaml
+type: markdown
+title: 📝 Sprawdziany i kartkówki
+content: |
+  {% set exams = state_attr('sensor.librus_imie_nazwisko_terminarz', 'events')
+     | selectattr('is_exam') | list %}
+  {% if exams %}
+  | Data | Za ile dni | Typ | Przedmiot | Opis |
+  |------|------------|-----|-----------|------|
+  {% for e in exams %}| **{{ e.date }}** ({{ e.weekday }}) | {{ e.days_until }} | {{ e.title }} | {{ e.subject }} | {{ e.description }} |
+  {% endfor %}
+  {% else %}Brak zapowiedzianych sprawdzianów.{% endif %}
+```
+
+### Karta zadań domowych
+
+```yaml
+type: markdown
+title: 📚 Zadania domowe
+content: |
+  {% set hw = state_attr('sensor.librus_imie_nazwisko_zadania_domowe', 'homework') %}
+  {% if hw %}
+  | Termin | Przedmiot | Kategoria | Temat |
+  |--------|-----------|-----------|-------|
+  {% for h in hw %}| **{{ h.due_date or '?' }}** | {{ h.subject }} | {{ h.category }} | {{ h.lesson }} |
+  {% endfor %}
+  {% else %}Brak zadań domowych.{% endif %}
+```
+
+Te same dane są w kalendarzach `calendar.librus_imie_nazwisko_terminarz` i
+`calendar.librus_imie_nazwisko_zadania_domowe`: w pełnej wersji, bez przycinania listy do limitu atrybutów.
 
 ### Wykres średniej z przedmiotu (Gauge)
 ```yaml

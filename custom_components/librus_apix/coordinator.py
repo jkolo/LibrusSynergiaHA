@@ -91,13 +91,30 @@ EVENT_KEY_NEW_GRADE = "new_grade"
 EVENT_KEY_NEW_EXAM = "new_exam"
 EVENT_KEY_NEW_ANNOUNCEMENT = "new_announcement"
 EVENT_KEY_NEW_ABSENCE = "new_absence"
+EVENT_KEY_NEW_HOMEWORK = "new_homework"
+EVENT_KEY_NEW_SCHEDULE_EVENT = "new_schedule_event"
 EVENT_KEYS = (
     EVENT_KEY_NEW_MESSAGE,
     EVENT_KEY_NEW_GRADE,
     EVENT_KEY_NEW_EXAM,
     EVENT_KEY_NEW_ANNOUNCEMENT,
     EVENT_KEY_NEW_ABSENCE,
+    EVENT_KEY_NEW_HOMEWORK,
+    EVENT_KEY_NEW_SCHEDULE_EVENT,
 )
+
+
+def _homework_key(hw: dict) -> tuple:
+    """Identity of a homework item for new-item detection."""
+    return (
+        hw.get("subject", ""), hw.get("due_date_raw", ""),
+        hw.get("category", ""), hw.get("lesson", ""),
+    )
+
+
+def _schedule_key(ev: dict) -> tuple:
+    """Identity of a schedule entry — same tuple as the new_exam detection."""
+    return (ev.get("date", ""), ev.get("subject", ""), ev.get("title", ""))
 
 
 def _is_recent(date_str: str) -> bool:
@@ -227,7 +244,7 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.read_messages_store: ReadMessagesStore | None = None
         self._step_timestamps: dict[str, datetime | None] = {k: None for k in (
             "student_info", "grades", "messages", "schedule",
-            "timetable", "attendance", "announcements",
+            "timetable", "attendance", "announcements", "homework",
         )}
         self._last_full_refresh: datetime | None = None
         self._seen_message_hrefs: OrderedDict[str, None] = OrderedDict()
@@ -235,6 +252,8 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._seen_exam_ids: OrderedDict[tuple, None] = OrderedDict()
         self._seen_announcement_keys: OrderedDict[tuple, None] = OrderedDict()
         self._seen_absence_keys: OrderedDict[tuple, None] = OrderedDict()
+        self._seen_homework_keys: OrderedDict[tuple, None] = OrderedDict()
+        self._seen_schedule_keys: OrderedDict[tuple, None] = OrderedDict()
         self._first_run: bool = True
         # Tracks consecutive ticks where every endpoint returned None — used
         # to escalate to a repair issue suggesting a librus-apix upgrade
@@ -326,6 +345,11 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                         att.get("symbol", ""),
                     ),
                 )
+
+        for hw in data.get("homework", []) or []:
+            _add_lru(self._seen_homework_keys, _homework_key(hw))
+        for ev in data.get("schedule", []) or []:
+            _add_lru(self._seen_schedule_keys, _schedule_key(ev))
 
     # ---------- Options helpers (PR 6) ----------
 
@@ -469,6 +493,7 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 ),
                 "attendance": self.client.async_get_attendance,
                 "announcements": self.client.async_get_announcements,
+                "homework": self.client.async_get_homework,
             }
             humanize = self._opt_humanize()
             order = (
@@ -485,7 +510,7 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 if results[name] is not None:
                     self._step_timestamps[name] = dt_util.utcnow()
                 # Skip jitter on first_run: HA cancels setup after ~60s,
-                # and 7 fetchers × up to 15s pause would exceed that limit.
+                # and 8 fetchers × up to 15s pause would exceed that limit.
                 if humanize and i < len(order) - 1 and not self._first_run:
                     pause = jitter_pause_seconds(self._rng)
                     _LOGGER.debug(
@@ -505,6 +530,14 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             timetable = results["timetable"]
             attendance = results["attendance"]
             announcements = results["announcements"]
+            # Homework keeps the cached list on failure in every path (not
+            # only when grades fail) — a transient ParseError must not blank
+            # the sensor and the calendar.
+            homework = results["homework"]
+            homework_list = (
+                homework if homework is not None
+                else (self.data or {}).get("homework", [])
+            )
 
             # Detect "every endpoint failed" (None) — indicates a likely
             # parser breakage in librus-apix. Threshold guards against a
@@ -513,7 +546,7 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 v is None
                 for v in (
                     student_info, grades, messages, schedule_all, timetable,
-                    attendance, announcements,
+                    attendance, announcements, homework,
                 )
             )
             if all_none:
@@ -581,6 +614,7 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                         if announcements is not None
                         else prev.get("announcements", [])
                     ),
+                    "homework": homework_list,
                     "current_semester": current_semester,
                 }
 
@@ -636,6 +670,7 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 ),
                 "attendance_by_subject": _attendance_by_subject(attendance_list),
                 "announcements": announcements_list,
+                "homework": homework_list,
                 "current_semester": current_semester,
             }
 
@@ -659,6 +694,7 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 self._enqueue_events(
                     annotated_messages, grades, exams_list,
                     announcements_list, attendance_list,
+                    homework_list, result["schedule"],
                 )
 
             if self.read_messages_store is not None:
@@ -714,6 +750,8 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         upcoming_exams: list[dict],
         announcements: list[dict],
         attendance: list[dict],
+        homework: list[dict],
+        schedule: list[dict],
     ) -> None:
         """Buffer payloads for newly observed items so event entities emit them.
 
@@ -822,6 +860,46 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     "teacher": att.get("teacher", ""),
                     "is_unjustified": bool(att.get("is_unjustified", False)),
                     "is_late": bool(att.get("is_late", False)),
+                }
+
+        for hw in homework:
+            hw_key = _homework_key(hw)
+            if hw_key not in self._seen_homework_keys:
+                _add_lru(self._seen_homework_keys, hw_key)
+                _LOGGER.debug(
+                    "New homework: %s %s (due %s)",
+                    hw.get("subject"), hw.get("category"), hw.get("due_date"),
+                )
+                self._pending_events[EVENT_KEY_NEW_HOMEWORK] = {
+                    "subject": hw.get("subject", ""),
+                    "category": hw.get("category", ""),
+                    "teacher": hw.get("teacher", ""),
+                    "lesson": hw.get("lesson", ""),
+                    "task_date": hw.get("task_date", ""),
+                    "due_date": hw.get("due_date"),
+                    "days_until": hw.get("days_until"),
+                }
+
+        for ev in schedule:
+            ev_key = _schedule_key(ev)
+            if ev_key not in self._seen_schedule_keys:
+                _add_lru(self._seen_schedule_keys, ev_key)
+                _LOGGER.debug(
+                    "New schedule entry: %s %s (%s)",
+                    ev.get("date"), ev.get("title"), ev.get("event_type"),
+                )
+                self._pending_events[EVENT_KEY_NEW_SCHEDULE_EVENT] = {
+                    "title": ev.get("title", ""),
+                    "subject": ev.get("subject", ""),
+                    "category": ev.get("category", ""),
+                    "description": ev.get("description", ""),
+                    "teacher": ev.get("teacher", ""),
+                    "date": ev.get("date", ""),
+                    "weekday": ev.get("weekday", ""),
+                    "time": ev.get("hour", ""),
+                    "event_type": ev.get("event_type", "other"),
+                    "is_exam": bool(ev.get("is_exam", False)),
+                    "days_until": ev.get("days_until", 0),
                 }
 
     def _annotate_messages(self, messages: list[dict] | None) -> list[dict]:

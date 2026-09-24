@@ -450,3 +450,58 @@ do wyciszania powiadomień w HA bez wpływu na Librusa).
 | `librus_apix.clear_read_messages` | `librus_apix.clear_dismissed_notifications` |
 
 Zaktualizuj automatyzacje i szablony Lovelace po aktualizacji do v3.3.0.
+
+---
+
+# Migracja v3.x → v4.0
+
+v4.0.0 zawiera **jedną zmianę łamiącą**: `sensor.librus_<dziecko>_zapowiedzi` zostaje usunięty,
+a zastępuje go `sensor.librus_<dziecko>_terminarz`. Stary wpis znika z rejestru encji
+automatycznie przy pierwszym starcie v4.0. Automatyzacje i karty, które go używały, trzeba
+przepiąć.
+
+Nowy sensor obejmuje **cały terminarz**: sprawdziany, kartkówki, dni wolne, wycieczki i zebrania.
+Sprawdziany filtrujesz flagą `is_exam`.
+
+## Stan encji
+
+| v3.x `zapowiedzi` | v4.0 `terminarz` |
+|---|---|
+| liczba sprawdzianów w ciągu 14 dni | liczba **wszystkich** nadchodzących wpisów |
+| — | liczba sprawdzianów w 14 dniach: atrybut `exams_in_14_days` |
+
+## Atrybuty
+
+| v3.x `zapowiedzi` | v4.0 `terminarz` |
+|---|---|
+| `exams` | `events \| selectattr('is_exam')` |
+| `count_in_3_days` | `exams_in_3_days` |
+| `count_in_7_days` | `exams_in_7_days` |
+| `count_in_14_days` | `exams_in_14_days` |
+| `total_count` | `exams_total` |
+
+Nowe pola każdego wpisu: `description` (opis od nauczyciela), `teacher`, `weekday`,
+`event_type`, `is_exam`, `is_day_off`. Lista `events` jest przycinana do ok. 12 KB
+(`events_truncated: true`); liczniki zawsze liczą całość.
+
+### Przykład — szablon
+
+```yaml
+# v3.x
+{{ state_attr('sensor.librus_jan_kowalski_zapowiedzi', 'count_in_7_days') }}
+
+# v4.0
+{{ state_attr('sensor.librus_jan_kowalski_terminarz', 'exams_in_7_days') }}
+{{ state_attr('sensor.librus_jan_kowalski_terminarz', 'events')
+   | selectattr('is_exam') | map(attribute='subject') | list }}
+```
+
+`sensor.librus_<dziecko>_next_exam` oraz `event.<dziecko>_new_exam` działają bez zmian.
+
+## Nowe w v4.0
+
+- `sensor.librus_<dziecko>_zadania_domowe` i `calendar.librus_<dziecko>_zadania_domowe`: zadania
+  domowe z terminem w najbliższych 30 dniach.
+- Encje zdarzeń `new_homework` (nowe zadanie domowe) i `new_schedule_event` (każdy nowy wpis
+  w terminarzu). Payload jest w atrybutach stanu, jak w pozostałych encjach zdarzeń.
+- Kalendarz „Terminarz” pokazuje w szczegółach wpisu `Opis:` i `Nauczyciel:`.

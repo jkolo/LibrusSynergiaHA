@@ -50,6 +50,7 @@ def fake_client(mock_student_info):
     client.async_get_schedule_events = AsyncMock(return_value=[])
     client.async_get_timetable_events = AsyncMock(return_value=[])
     client.async_get_attendance = AsyncMock(return_value=[])
+    client.async_get_homework = AsyncMock(return_value=[])
     client.async_get_announcements = AsyncMock(return_value=[])
     return client
 
@@ -180,6 +181,7 @@ async def test_repair_issue_lib_outdated_after_threshold(
     fake_client.async_get_schedule_events = AsyncMock(return_value=None)
     fake_client.async_get_timetable_events = AsyncMock(return_value=None)
     fake_client.async_get_attendance = AsyncMock(return_value=None)
+    fake_client.async_get_homework = AsyncMock(return_value=None)
     fake_client.async_get_announcements = AsyncMock(return_value=None)
 
     issue_id = coordinator._issue_id(ISSUE_LIB_OUTDATED)
@@ -218,6 +220,7 @@ async def test_repair_issue_lib_outdated_clears_on_recovery(
     fake_client.async_get_schedule_events = AsyncMock(return_value=None)
     fake_client.async_get_timetable_events = AsyncMock(return_value=None)
     fake_client.async_get_attendance = AsyncMock(return_value=None)
+    fake_client.async_get_homework = AsyncMock(return_value=None)
     fake_client.async_get_announcements = AsyncMock(return_value=None)
     for _ in range(5):
         await coordinator.async_refresh()
@@ -275,12 +278,15 @@ async def test_random_order_uses_injected_rng(
     fake_client.async_get_announcements = await _record(
         "announcements", fake_client.async_get_announcements
     )
+    fake_client.async_get_homework = await _record(
+        "homework", fake_client.async_get_homework
+    )
 
     await coordinator.async_refresh()
     await hass.async_block_till_done()
 
     natural = ["student_info", "grades", "messages", "schedule", "timetable",
-               "attendance", "announcements"]
+               "attendance", "announcements", "homework"]
     # Each fetcher called exactly once.
     assert sorted(call_order) == sorted(natural)
     # Order is NOT the natural dict order — the shuffle should produce
@@ -326,8 +332,8 @@ async def test_pause_invoked_between_endpoints(hass: HomeAssistant, fake_client)
         await coordinator.async_refresh()
         await hass.async_block_till_done()
 
-    # 7 fetcherow → 6 pauz między nimi.
-    assert len(pause_seconds) == 6
+    # 8 fetcherow → 7 pauz między nimi.
+    assert len(pause_seconds) == 7
 
 
 async def test_schedule_next_refresh_uses_async_call_later(
@@ -491,3 +497,97 @@ async def test_repair_issue_auth_failed_on_libraryauth_error(
     assert issue is not None
     assert issue.severity == ir.IssueSeverity.ERROR
     assert issue.translation_key == ISSUE_AUTH_FAILED
+
+
+# ---------------------------------------------------------------------------
+# Homework + schedule events (v4.0)
+# ---------------------------------------------------------------------------
+
+
+def _homework(subject: str = "Matematyka", due: str = "2026-10-02") -> dict:
+    return {
+        "subject": subject, "category": "Zadanie domowe", "teacher": "Anna",
+        "lesson": "Funkcje", "task_date": "2026-09-25", "due_date": due,
+        "due_date_raw": f"{due} piątek", "days_until": 7, "href": "1",
+    }
+
+
+def _schedule_event(title: str = "Wycieczka", date: str = "2026-10-05") -> dict:
+    return {
+        "title": title, "subject": "", "category": "", "date": date,
+        "hour": "", "weekday": "poniedziałek", "description": "Kraków",
+        "teacher": "Anna", "event_type": "other", "is_exam": False,
+        "is_day_off": False, "days_until": 10,
+    }
+
+
+async def test_homework_in_data_and_first_run_seeds_only(
+    hass: HomeAssistant, fake_client
+):
+    fake_client.async_get_homework = AsyncMock(return_value=[_homework()])
+    fake_client.async_get_schedule_events = AsyncMock(
+        return_value=[_schedule_event()]
+    )
+    coordinator = LibrusDataUpdateCoordinator(hass, fake_client)
+    await coordinator.async_refresh()
+    await hass.async_block_till_done()
+
+    assert coordinator.data["homework"] == [_homework()]
+    assert coordinator.consume_pending_event("new_homework") is None
+    assert coordinator.consume_pending_event("new_schedule_event") is None
+
+
+async def test_new_homework_enqueues_event(hass: HomeAssistant, fake_client):
+    fake_client.async_get_homework = AsyncMock(return_value=[_homework()])
+    coordinator = LibrusDataUpdateCoordinator(hass, fake_client)
+    await coordinator.async_refresh()
+    await hass.async_block_till_done()
+
+    fake_client.async_get_homework = AsyncMock(
+        return_value=[_homework(), _homework("Polski", "2026-10-03")]
+    )
+    await coordinator.async_refresh()
+    await hass.async_block_till_done()
+
+    payload = coordinator.consume_pending_event("new_homework")
+    assert payload == {
+        "subject": "Polski",
+        "category": "Zadanie domowe",
+        "teacher": "Anna",
+        "lesson": "Funkcje",
+        "task_date": "2026-09-25",
+        "due_date": "2026-10-03",
+        "days_until": 7,
+    }
+
+
+async def test_new_schedule_event_enqueues_event(hass: HomeAssistant, fake_client):
+    coordinator = LibrusDataUpdateCoordinator(hass, fake_client)
+    await coordinator.async_refresh()
+    await hass.async_block_till_done()
+
+    fake_client.async_get_schedule_events = AsyncMock(
+        return_value=[_schedule_event()]
+    )
+    await coordinator.async_refresh()
+    await hass.async_block_till_done()
+
+    payload = coordinator.consume_pending_event("new_schedule_event")
+    assert payload is not None
+    assert payload["title"] == "Wycieczka"
+    assert payload["description"] == "Kraków"
+    assert payload["event_type"] == "other"
+    assert payload["date"] == "2026-10-05"
+
+
+async def test_homework_none_keeps_cached(hass: HomeAssistant, fake_client):
+    fake_client.async_get_homework = AsyncMock(return_value=[_homework()])
+    coordinator = LibrusDataUpdateCoordinator(hass, fake_client)
+    await coordinator.async_refresh()
+    await hass.async_block_till_done()
+
+    fake_client.async_get_homework = AsyncMock(return_value=None)
+    await coordinator.async_refresh()
+    await hass.async_block_till_done()
+
+    assert coordinator.data["homework"] == [_homework()]

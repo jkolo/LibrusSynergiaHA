@@ -71,8 +71,8 @@
       "messages": {
         "name": "Messages"
       },
-      "upcoming_exams": {
-        "name": "Upcoming exams"
+      "schedule": {
+        "name": "Schedule"
       },
       "latest_grade": {
         "name": "Latest grade"
@@ -100,6 +100,9 @@
       },
       "last_refresh": {
         "name": "Last refresh"
+      },
+      "homework": {
+        "name": "Homework"
       }
     },
     "calendar": {
@@ -114,6 +117,9 @@
       },
       "grades_calendar": {
         "name": "Grades"
+      },
+      "homework": {
+        "name": "Homework"
       }
     },
     "event": {
@@ -131,6 +137,12 @@
       },
       "new_absence": {
         "name": "New absence"
+      },
+      "new_homework": {
+        "name": "New homework"
+      },
+      "new_schedule_event": {
+        "name": "New schedule entry"
       }
     }
   },

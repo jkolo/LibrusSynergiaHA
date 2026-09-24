@@ -74,3 +74,57 @@ fetch_message_content:
       example: "12345"
       selector:
         text:
+
+list_messages:
+  name: Lista wiadomości
+  description: >
+    Zwraca w response_variable stronę nagłówków wiadomości z lokalnego cache
+    integracji (sender, title, date, unread, has_attachment, href) oraz
+    has_more i total_count. Nie odpytuje Librusa i nie oznacza wiadomości
+    jako przeczytanych. Używane przez kartę librus-messages-card.
+  fields:
+    entry:
+      name: Konto Librus
+      required: true
+      selector:
+        config_entry:
+          integration: librus_apix
+    offset:
+      name: Przesunięcie
+      description: Ile najnowszych wiadomości pominąć (paginacja).
+      default: 0
+      selector:
+        number:
+          min: 0
+          max: 10000
+          mode: box
+    count:
+      name: Liczba wiadomości
+      description: Ile wiadomości zwrócić (1–100).
+      default: 10
+      selector:
+        number:
+          min: 1
+          max: 100
+          mode: box
+
+download_attachment:
+  name: Pobierz załącznik
+  description: >
+    Pobiera załącznik wiadomości z Librusa i zwraca w response_variable
+    filename, content_type oraz data (base64). URL załącznika pochodzi z pola
+    attachments odpowiedzi akcji fetch_message_content.
+  fields:
+    entry:
+      name: Konto Librus
+      required: true
+      selector:
+        config_entry:
+          integration: librus_apix
+    attachment_url:
+      name: URL załącznika
+      description: >
+        Wartość attachments[].url z odpowiedzi fetch_message_content.
+      required: true
+      selector:
+        text:

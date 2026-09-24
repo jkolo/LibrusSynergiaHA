@@ -1,5 +1,30 @@
 # Changelog
 
+## [4.0.0] – 2026-09-25
+
+### ⚠️ Zmiana łamiąca
+
+- **`sensor.librus_<dziecko>_zapowiedzi` usunięty — zastępuje go `sensor.librus_<dziecko>_terminarz`.** Nowy sensor zawiera cały terminarz (sprawdziany, kartkówki, dni wolne, wycieczki, zebrania), a sprawdziany filtruje się flagą `is_exam`. Stary wpis znika z rejestru encji automatycznie przy starcie integracji. Mapowanie atrybutów: [MIGRATION.md](MIGRATION.md#migracja-v3x--v40).
+
+### Dodano
+
+- **Terminarz z opisem i nauczycielem.** Wpisy terminarza mają pola `description` (opis wpisany przez nauczyciela), `teacher`, `weekday` (polska nazwa dnia) i `details`. Kalendarz „Terminarz” pokazuje opis i nauczyciela w szczegółach wpisu.
+- **`sensor.librus_<dziecko>_terminarz`**: stan to liczba nadchodzących wpisów. Atrybuty: `events`, `count`, `by_type`, `exams_in_3_days` / `exams_in_7_days` / `exams_in_14_days`, `exams_total`. Lista `events` jest przycinana do ok. 12 KB (flaga `events_truncated`, opis skracany do 150 znaków), żeby zmieścić się w limicie 16 KB recordera. Pełne dane są w kalendarzu.
+- **Zadania domowe.** Sensor `sensor.librus_<dziecko>_zadania_domowe` (zadania z terminem w najbliższych 30 dniach; atrybuty `homework`, `by_subject`, `due_in_3_days`, `due_in_7_days`) i kalendarz `calendar.librus_<dziecko>_zadania_domowe` (wpisy całodniowe w dniu terminu). Integracja pobiera tylko listę zadań, nie otwiera szczegółów.
+- **Nowe encje zdarzeń:** `new_homework` (nowe zadanie domowe) i `new_schedule_event` (każdy nowy wpis w terminarzu, nie tylko sprawdzian).
+- README: przykładowe karty terminarza, sprawdzianów i zadań domowych.
+
+### Naprawiono
+
+- **`librus-subject-grades-card` pokazywała entity_id zamiast nazwy przedmiotu w nagłówku.** Sensor przedmiotu wystawia teraz atrybut `subject`.
+- **Akcje `list_messages` i `download_attachment` bez opisów.** Obie mają wpisy w `services.yaml`, więc w Narzędziach deweloperskich pokazują nazwy i pola.
+
+### Synchronizacja z upstream
+
+- Zmerge'owano [LukMaverick/LibrusSynergiaHA](https://github.com/LukMaverick/LibrusSynergiaHA) do v1.1.5. Wymaganie `librus-apix>=1.5.1` było już spełnione (`==1.5.1`). Zadania domowe i sensor terminarza przeniesiono na architekturę v3 (angielskie klucze atrybutów, encje zdarzeń zamiast `hass.bus`).
+
+---
+
 ## [3.8.1] – 2026-05-23
 
 ### Naprawiono

@@ -22,6 +22,7 @@ from homeassistant.const import CONF_PASSWORD, CONF_USERNAME
 from homeassistant.core import HomeAssistant, ServiceCall, SupportsResponse
 from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers import config_validation as cv
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.event import async_call_later
 from homeassistant.util import dt as dt_util
 from librus_apix import urls as librus_urls
@@ -30,6 +31,7 @@ from librus_apix.attendance import get_attendance, get_attendance_frequency
 from librus_apix.client import Client, new_client
 from librus_apix.exceptions import MaintananceError, TokenError
 from librus_apix.grades import get_grades
+from librus_apix.homework import get_homework
 from librus_apix.messages import get_max_page_number, get_received
 from librus_apix.schedule import get_schedule
 from librus_apix.student_information import get_student_information
@@ -56,6 +58,31 @@ from .humanize import build_headers, pick_user_agent
 T = TypeVar("T")
 
 _LOGGER = logging.getLogger(__name__)
+
+_ISO_DATE_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
+_PL_DATE_RE = re.compile(r"\d{2}\.\d{2}\.\d{4}")
+
+
+def _parse_librus_date(text: str) -> _date | None:
+    """Wyciagnij date z tekstu Librusa ("2026-10-02 piątek", "02.10.2026")."""
+    if m := _ISO_DATE_RE.search(text or ""):
+        try:
+            return _date.fromisoformat(m.group())
+        except ValueError:
+            return None
+    if m := _PL_DATE_RE.search(text or ""):
+        try:
+            return _dt.strptime(m.group(), "%d.%m.%Y").date()
+        except ValueError:
+            return None
+    return None
+
+
+# Polskie nazwy dni tygodnia (date.weekday(): 0 = poniedzialek) — stala
+# zamiast strftime("%A"), ktore zalezy od locale kontenera HA.
+_WEEKDAYS_PL = (
+    "poniedziałek", "wtorek", "środa", "czwartek", "piątek", "sobota", "niedziela",
+)
 
 PLATFORMS = ["sensor", "calendar", "event"]
 
@@ -593,6 +620,12 @@ class LibrusApiClient:
                 if only_exams and not is_exam:
                     continue
 
+                # librus-apix wstawia literal "unknown" gdy tooltip nie ma pola.
+                details = {
+                    k: v for k, v in data_dict.items()
+                    if v and v != "unknown"
+                }
+
                 days_until = (event_date - today).days
                 upcoming.append({
                     "title": event.title,
@@ -601,6 +634,10 @@ class LibrusApiClient:
                     "date": event_date.isoformat(),
                     "hour": event.hour or "",
                     "day_label": event.day or "",
+                    "weekday": _WEEKDAYS_PL[event_date.weekday()],
+                    "description": details.get("Opis", ""),
+                    "teacher": details.get("Nauczyciel", ""),
+                    "details": details,
                     "lesson_number": event.number,
                     "href": event.href or "",
                     "days_until": days_until,
@@ -613,6 +650,44 @@ class LibrusApiClient:
             return upcoming
 
         return await self._with_retry("schedule", _work)
+
+    async def async_get_homework(
+        self, days_ahead: int = 30
+    ) -> list[dict[str, Any]] | None:
+        """Pobierz liste zadan domowych z terminem w najblizszych `days_ahead` dniach.
+
+        Tylko lista (get_homework) — NIE wolamy homework_detail, zeby nie
+        generowac dodatkowego ruchu ani sladow otwierania szczegolow.
+
+        Returns:
+            Lista dictow: subject, category, teacher, lesson, task_date,
+            due_date (ISO lub None), due_date_raw, days_until, href —
+            posortowana po due_date (None na koncu).
+        """
+        today = _date.today()
+        date_from = today.isoformat()
+        date_to = (today + timedelta(days=days_ahead)).isoformat()
+
+        def _work(client: Client) -> list[dict[str, Any]]:
+            result: list[dict[str, Any]] = []
+            for hw in get_homework(client, date_from, date_to):
+                due = _parse_librus_date(hw.completion_date)
+                task = _parse_librus_date(hw.task_date)
+                result.append({
+                    "subject": hw.subject,
+                    "category": hw.category,
+                    "teacher": hw.teacher,
+                    "lesson": hw.lesson,
+                    "task_date": task.isoformat() if task else hw.task_date,
+                    "due_date": due.isoformat() if due else None,
+                    "due_date_raw": hw.completion_date,
+                    "days_until": (due - today).days if due else None,
+                    "href": hw.href,
+                })
+            result.sort(key=lambda h: (h["due_date"] is None, h["due_date"] or ""))
+            return result
+
+        return await self._with_retry("homework", _work)
 
     async def async_get_timetable_events(
         self, weeks_ahead: int = 2
@@ -1157,12 +1232,32 @@ async def async_setup_entry(hass: HomeAssistant, entry: LibrusConfigEntry) -> bo
 
     entry.runtime_data = LibrusRuntimeData(client=client, coordinator=coordinator)
 
+    _remove_obsolete_entities(hass, entry)
     _setup_services(hass)
     entry.async_on_unload(entry.add_update_listener(_async_options_updated))
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
     return True
+
+
+# unique_id suffixes of entities dropped in past releases. Stale registry
+# entries would otherwise linger forever as "unavailable".
+_OBSOLETE_ENTITY_SUFFIXES: tuple[tuple[str, str], ...] = (
+    ("sensor", "zapowiedzi"),  # v4.0: replaced by sensor.terminarz
+)
+
+
+def _remove_obsolete_entities(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Remove registry entries of entities no longer provided by the integration."""
+    registry = er.async_get(hass)
+    for platform, suffix in _OBSOLETE_ENTITY_SUFFIXES:
+        entity_id = registry.async_get_entity_id(
+            platform, DOMAIN, f"{entry.entry_id}_{suffix}"
+        )
+        if entity_id is not None:
+            _LOGGER.info("Removing obsolete entity %s", entity_id)
+            registry.async_remove(entity_id)
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: LibrusConfigEntry) -> bool:

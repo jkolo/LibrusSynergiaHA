@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -155,20 +156,93 @@ def _attrs_messages(data: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _val_upcoming_exams_count(data: dict[str, Any]) -> StateType:
-    """Number of upcoming exams within a 14-day window."""
-    exams = data.get("upcoming_exams", []) or []
-    return sum(1 for e in exams if e.get("days_until", 99) <= 14)
+# Pola wpisu terminarza wystawiane w atrybutach sensora. Pomijamy `href`,
+# `details` i `day_label` — duplikaty/techniczne, a atrybuty musza zmiescic
+# sie w 16 KB limicie recordera HA.
+_SCHEDULE_ATTR_FIELDS = (
+    "date", "weekday", "title", "subject", "category", "description",
+    "teacher", "hour", "lesson_number", "event_type", "is_exam",
+    "is_day_off", "days_until",
+)
+# Budzet na liste `events` (bajty JSON). Reszta atrybutow to kilkaset
+# bajtow; calosc musi zmiescic sie w 16 KB limicie recordera. Pelny
+# terminarz zawsze jest w calendar.terminarz.
+_SCHEDULE_EVENTS_BUDGET = 12_000
+_SCHEDULE_DESCRIPTION_MAX = 150
 
 
-def _attrs_upcoming_exams(data: dict[str, Any]) -> dict[str, Any]:
-    exams = data.get("upcoming_exams", []) or []
+def _compact_schedule_event(e: dict[str, Any]) -> dict[str, Any]:
+    view = {k: e.get(k) for k in _SCHEDULE_ATTR_FIELDS}
+    desc = view.get("description") or ""
+    if len(desc) > _SCHEDULE_DESCRIPTION_MAX:
+        view["description"] = desc[: _SCHEDULE_DESCRIPTION_MAX - 1] + "…"
+    return view
+
+
+def _val_schedule_count(data: dict[str, Any]) -> StateType:
+    """Number of upcoming schedule (terminarz) entries."""
+    return len(data.get("schedule") or [])
+
+
+def _attrs_schedule(data: dict[str, Any]) -> dict[str, Any]:
+    events = data.get("schedule") or []
+    exams = [e for e in events if e.get("is_exam")]
+    by_type: dict[str, int] = {}
+    for e in events:
+        t = e.get("event_type", "other")
+        by_type[t] = by_type.get(t, 0) + 1
+    shown: list[dict[str, Any]] = []
+    used = 0
+    for e in events:
+        view = _compact_schedule_event(e)
+        size = len(json.dumps(view, ensure_ascii=False).encode())
+        if used + size > _SCHEDULE_EVENTS_BUDGET:
+            break
+        shown.append(view)
+        used += size
     return {
-        "exams": exams,
-        "count_in_3_days": sum(1 for e in exams if e.get("days_until", 99) <= 3),
-        "count_in_7_days": sum(1 for e in exams if e.get("days_until", 99) <= 7),
-        "count_in_14_days": sum(1 for e in exams if e.get("days_until", 99) <= 14),
-        "total_count": len(exams),
+        "events": shown,
+        "events_truncated": len(shown) < len(events),
+        "count": len(events),
+        "by_type": by_type,
+        "exams_in_3_days": sum(1 for e in exams if e.get("days_until", 99) <= 3),
+        "exams_in_7_days": sum(1 for e in exams if e.get("days_until", 99) <= 7),
+        "exams_in_14_days": sum(1 for e in exams if e.get("days_until", 99) <= 14),
+        "exams_total": len(exams),
+    }
+
+
+# Pola zadania domowego wystawiane w atrybutach (bez href/due_date_raw).
+_HOMEWORK_ATTR_FIELDS = (
+    "subject", "category", "teacher", "lesson", "task_date", "due_date",
+    "days_until",
+)
+
+
+def _val_homework_count(data: dict[str, Any]) -> StateType:
+    """Number of homework items due in the fetched window (30 days)."""
+    return len(data.get("homework") or [])
+
+
+def _attrs_homework(data: dict[str, Any]) -> dict[str, Any]:
+    items = data.get("homework") or []
+    by_subject: dict[str, int] = {}
+    for h in items:
+        subj = h.get("subject", "")
+        by_subject[subj] = by_subject.get(subj, 0) + 1
+
+    def _due_within(days: int) -> int:
+        return sum(
+            1 for h in items
+            if h.get("days_until") is not None and h["days_until"] <= days
+        )
+
+    return {
+        "homework": [{k: h.get(k) for k in _HOMEWORK_ATTR_FIELDS} for h in items],
+        "count": len(items),
+        "by_subject": by_subject,
+        "due_in_3_days": _due_within(3),
+        "due_in_7_days": _due_within(7),
     }
 
 
@@ -482,12 +556,20 @@ SENSORS: tuple[LibrusSensorEntityDescription, ...] = (
         attrs_fn=_attrs_messages,
     ),
     LibrusSensorEntityDescription(
-        key="zapowiedzi",
-        translation_key="upcoming_exams",
-        icon="mdi:calendar-alert",
+        key="terminarz",
+        translation_key="schedule",
+        icon="mdi:calendar-month",
         state_class=SensorStateClass.MEASUREMENT,
-        value_fn=_val_upcoming_exams_count,
-        attrs_fn=_attrs_upcoming_exams,
+        value_fn=_val_schedule_count,
+        attrs_fn=_attrs_schedule,
+    ),
+    LibrusSensorEntityDescription(
+        key="zadania",
+        translation_key="homework",
+        icon="mdi:book-open-page-variant",
+        state_class=SensorStateClass.MEASUREMENT,
+        value_fn=_val_homework_count,
+        attrs_fn=_attrs_homework,
     ),
     # ---- v3.0 NEW: latest_/next_ sensors ----
     LibrusSensorEntityDescription(
@@ -643,6 +725,7 @@ class LibrusSubjectGradesSensor(LibrusBaseEntity, SensorEntity):
                     continue
 
         return {
+            "subject": self._subject,
             "grade_list": ", ".join(g["grade"] for g in grades),
             "grade_details": _grade_details_view(grades),
             "average": average,

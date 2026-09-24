@@ -10,6 +10,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.util import dt as dt_util
 from librus_apix.student_information import StudentInformation
 
+from custom_components.librus_apix.const import DOMAIN
 from custom_components.librus_apix._data_store import LibrusDataStore
 
 
@@ -143,3 +144,28 @@ async def test_setup_uses_cache_skips_first_refresh(
     assert coordinator.data is cached_data
     # _first_run powinno być False (seed already done from cache)
     assert coordinator._first_run is False
+
+
+async def test_setup_removes_obsolete_zapowiedzi_sensor(
+    hass: HomeAssistant, mock_config_entry, mock_librus_client
+):
+    """v4.0: sensor.zapowiedzi zastąpiony przez sensor.terminarz — stary
+    wpis w entity registry jest usuwany przy setupie."""
+    from homeassistant.helpers import entity_registry as er
+
+    mock_config_entry.add_to_hass(hass)
+    registry = er.async_get(hass)
+    registry.async_get_or_create(
+        "sensor", DOMAIN, f"{mock_config_entry.entry_id}_zapowiedzi",
+        config_entry=mock_config_entry,
+    )
+
+    assert await hass.config_entries.async_setup(mock_config_entry.entry_id)
+    await hass.async_block_till_done()
+
+    assert registry.async_get_entity_id(
+        "sensor", DOMAIN, f"{mock_config_entry.entry_id}_zapowiedzi"
+    ) is None
+    assert registry.async_get_entity_id(
+        "sensor", DOMAIN, f"{mock_config_entry.entry_id}_terminarz"
+    ) is not None

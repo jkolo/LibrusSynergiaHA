@@ -1,7 +1,8 @@
 """Event entities for the Librus APIX integration (v3.0).
 
 Replaces the legacy `hass.bus.fire` mechanism. Each event entity (`new_grade`,
-`new_message`, `new_exam`, `new_announcement`, `new_absence`) reads pending
+`new_message`, `new_exam`, `new_announcement`, `new_absence`, `new_homework`,
+`new_schedule_event`) reads pending
 payloads from the coordinator on every refresh — when present, it triggers
 an event of type `"new"` carrying the payload as attributes.
 
@@ -61,6 +62,18 @@ EVENTS: tuple[LibrusEventEntityDescription, ...] = (
         key="new_absence",
         translation_key="new_absence",
         icon="mdi:account-remove",
+        event_types=["new"],
+    ),
+    LibrusEventEntityDescription(
+        key="new_homework",
+        translation_key="new_homework",
+        icon="mdi:book-plus",
+        event_types=["new"],
+    ),
+    LibrusEventEntityDescription(
+        key="new_schedule_event",
+        translation_key="new_schedule_event",
+        icon="mdi:calendar-plus",
         event_types=["new"],
     ),
 )
