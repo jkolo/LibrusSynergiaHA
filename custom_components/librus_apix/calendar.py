@@ -40,6 +40,7 @@ EVENT_TYPE_TAGS = {
     "essay_test": ("WYPRACOWANIE", "📜"),
     "test": ("TEST", "🧪"),
     "day_off": ("WOLNE", "🏖️"),
+    "teacher_absence": ("NIEOBECNOSC-NAUCZYCIELA", "👤"),
     "other": ("INFO", "📌"),
 }
 

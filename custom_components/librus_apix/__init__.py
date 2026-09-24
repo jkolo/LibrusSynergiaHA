@@ -78,6 +78,14 @@ def _parse_librus_date(text: str) -> _date | None:
     return None
 
 
+_PL_ASCII = str.maketrans("ąćęłńóśźżĄĆĘŁŃÓŚŹŻ", "acelnoszzACELNOSZZ")
+
+
+def _fold_pl(text: str) -> str:
+    """Lowercase + polskie znaki na ASCII ("Kartkówka" -> "kartkowka")."""
+    return (text or "").translate(_PL_ASCII).lower()
+
+
 # Polskie nazwy dni tygodnia (date.weekday(): 0 = poniedzialek) — stala
 # zamiast strftime("%A"), ktore zalezy od locale kontenera HA.
 _WEEKDAYS_PL = (
@@ -562,9 +570,10 @@ class LibrusApiClient:
         # Slowa kluczowe wykluczajace - jesli wystapia, event jest klasyfikowany
         # jako dzien_wolny (Librus pokazuje "Egzamin osmoklasisty - dzien wolny"
         # jako event, ale to dzien wolny od zajec, nie sprawdzian).
+        # Haystack jest znormalizowany przez _fold_pl, wiec slowa kluczowe
+        # sa ASCII ("kartkowka" lapie tez "Kartkówka").
         exclude_keywords = (
             "dzien wolny",
-            "dzień wolny",
             "wolne od zaj",
             "wolny od zaj",
         )
@@ -609,23 +618,29 @@ class LibrusApiClient:
                 if event_date < today:
                     continue  # przeszle pomijamy
 
-                title = (event.title or "").lower()
+                title = _fold_pl(event.title)
                 subject = event.subject or ""
                 # event.data to dict - moze zawierac szczegoly (Kategoria, Typ)
                 data_dict = event.data if isinstance(event.data, dict) else {}
-                category_str = str(data_dict.get("Kategoria", "")).lower()
-                type_str = str(data_dict.get("Typ", "")).lower()
+                category_str = _fold_pl(str(data_dict.get("Kategoria", "")))
+                type_str = _fold_pl(str(data_dict.get("Typ", "")))
                 haystack = f"{title} {category_str} {type_str}"
                 href_lower = (event.href or "").lower()
 
-                is_day_off = (
+                # Nieobecnosc nauczyciela ("Nieobecność:" / "Nauczyciel: X")
+                # Librus linkuje jak dzien wolny (szczegoly_wolne), ale uczen
+                # ma zajecia (zastepstwo/odwolana lekcja) — to nie dzien wolny.
+                is_teacher_absence = _fold_pl(subject).startswith("nieobecnosc")
+                is_day_off = not is_teacher_absence and (
                     any(ex in haystack for ex in exclude_keywords)
                     or any(frag in href_lower for frag in exclude_href_fragments)
                 )
                 # Machine-readable classification for calendar tagging.
                 # Values are English codes; calendar.py maps them to Polish
                 # display tags (SPRAWDZIAN, KARTKOWKA, ...) in summaries.
-                if is_day_off:
+                if is_teacher_absence:
+                    event_type = "teacher_absence"
+                elif is_day_off:
                     event_type = "day_off"
                 elif "sprawdzian" in haystack:
                     event_type = "exam"

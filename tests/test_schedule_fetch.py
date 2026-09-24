@@ -80,3 +80,50 @@ async def test_unknown_placeholders_become_empty(hass, client):
     assert ev["description"] == ""
     assert ev["teacher"] == ""
     assert ev["details"] == {"Sala": "12"}
+
+
+# ---------------------------------------------------------------------------
+# Klasyfikacja event_type (dane z produkcji, 2026-09-25)
+# ---------------------------------------------------------------------------
+
+
+def _raw_event(subject: str, title: str, href: str = "terminarz/szczegoly/1") -> Event:
+    return Event(
+        title=title, subject=subject, data={}, day=str(date.today().day),
+        number="unknown", hour="unknown", href=href,
+    )
+
+
+async def test_kartkowka_with_polish_o_is_quiz(hass, client):
+    """Librus pisze „Kartkówka” (ó) — heurystyka szukała tylko „kartkow”."""
+    result = await _fetch(client, _raw_event("język angielski", "Kartkówka"))
+    assert result[0]["event_type"] == "quiz"
+    assert result[0]["is_exam"] is True
+
+
+async def test_teacher_absence_is_not_day_off(hass, client):
+    """Nieobecność nauczyciela to nie dzień wolny ucznia (is_school_day)."""
+    result = await _fetch(
+        client,
+        _raw_event(
+            "Nieobecność:", "Nauczyciel: wakat matematyka",
+            href="terminarz/szczegoly_wolne/123",
+        ),
+    )
+    ev = result[0]
+    assert ev["event_type"] == "teacher_absence"
+    assert ev["is_day_off"] is False
+    assert ev["is_exam"] is False
+
+
+async def test_school_day_off_still_detected(hass, client):
+    result = await _fetch(
+        client,
+        _raw_event(
+            "Dzień Edukacji Narodowej - wolny od zajęć dydaktycznych: SP 110",
+            "Dzień Edukacji Narodowej - wolny od zajęć dydaktycznych: SP 110",
+            href="terminarz/szczegoly_wolne/55",
+        ),
+    )
+    assert result[0]["event_type"] == "day_off"
+    assert result[0]["is_day_off"] is True
