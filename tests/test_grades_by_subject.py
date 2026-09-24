@@ -116,6 +116,8 @@ async def test_subject_grades_sensor_attrs_include_grade_details(
     assert first["description"] == "Świetna praca, drobne błędy w zad. 4."
     # Surowy słownik grades został usunięty z atrybutów (redundantny z grade_details).
     assert "grades" not in attrs
+    # librus-subject-grades-card czyta attributes.subject jako tytuł karty.
+    assert attrs["subject"] == "Matematyka"
 
 
 async def test_subject_average_sensor_attrs_compact(

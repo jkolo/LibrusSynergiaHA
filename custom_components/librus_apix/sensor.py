@@ -725,6 +725,7 @@ class LibrusSubjectGradesSensor(LibrusBaseEntity, SensorEntity):
                     continue
 
         return {
+            "subject": self._subject,
             "grade_list": ", ".join(g["grade"] for g in grades),
             "grade_details": _grade_details_view(grades),
             "average": average,
