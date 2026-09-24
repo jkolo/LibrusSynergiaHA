@@ -18,6 +18,8 @@
 ### Naprawiono
 
 - **`librus-subject-grades-card` pokazywała entity_id zamiast nazwy przedmiotu w nagłówku.** Sensor przedmiotu wystawia teraz atrybut `subject`.
+- **Kartkówki nie były rozpoznawane jako sprawdziany.** Librus pisze „Kartkówka” przez „ó”, a klasyfikator szukał „kartkow”. Wpisy trafiały do `other`, nie liczyły się do `is_exam`/`exams_in_*` i nie tworzyły obowiązków nauki. Klasyfikator porównuje teraz tekst bez polskich znaków.
+- **Nieobecność nauczyciela traktowana jak dzień wolny.** Wpisy „Nieobecność: / Nauczyciel: …” (Librus linkuje je jak dni wolne) dostawały `day_off`, więc `is_school_day` uznawał dzień za wolny i synchronizacja zwalniała (np. wakat nauczyciela zaznaczał tak cały tydzień). Mają teraz osobny typ `teacher_absence` (tag `[NIEOBECNOSC-NAUCZYCIELA]` w kalendarzu) i `is_day_off: false`.
 - **Karty Librusa ładowane w kilku wersjach naraz.** Zasoby Lovelace zawierały duplikaty (`?v=3.8.0`, `?v=3.8.1`, `?v=4.0.0`), przeglądarka zgłaszała „has already been used with this registry”, a wygrywała przypadkowa, często stara wersja karty. Rejestracja zostawia teraz dokładnie jeden wpis na kartę i usuwa pozostałe.
 - **Akcje `list_messages` i `download_attachment` bez opisów.** Obie mają wpisy w `services.yaml`, więc w Narzędziach deweloperskich pokazują nazwy i pola.
 

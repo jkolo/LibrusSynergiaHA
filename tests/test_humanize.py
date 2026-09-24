@@ -223,3 +223,13 @@ class TestNextRunDelay:
             now=datetime.now(),
         )
         assert d == pytest.approx(720 * 60, rel=1e-6)
+
+
+def test_is_school_day_ignores_teacher_absence():
+    """Nieobecność nauczyciela (np. wakat) nie czyni dnia wolnym dla ucznia."""
+    monday = date(2026, 9, 28)
+    events = [{
+        "date": monday.isoformat(), "event_type": "teacher_absence",
+        "is_day_off": False,
+    }]
+    assert is_school_day(monday, events) is True
