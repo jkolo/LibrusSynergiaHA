@@ -139,3 +139,84 @@ async def test_subject_average_sensor_attrs_compact(
     assert attrs["grade_count"] == 2
     # State pozostaje floatem (średnia).
     assert isinstance(sensor.native_value, float)
+
+
+# ---------------------------------------------------------------------------
+# Poprawy ocen ("Poprawa oceny") — powiązanie poprawy z poprawianą oceną
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def fake_client_with_correction(mock_student_info):
+    """Klient z oceną poprawioną (1 z kartkówki) i jej poprawą (6)."""
+    client = MagicMock()
+    client.username = "test_user"
+    client.async_authenticate = AsyncMock(return_value=True)
+    client.async_get_student_information = AsyncMock(return_value=mock_student_info)
+    client.async_get_grades = AsyncMock(return_value=[
+        {
+            "subject": "matematyka", "grade": "1", "value": "Does not count",
+            "counts": False, "weight": 0, "date": "2026-09-17",
+            "category": "kartkówka", "description": "", "title": "Ułamki",
+            "teacher": "Anna Nowak", "semester": 1, "type": "numeric",
+        },
+        {
+            "subject": "matematyka", "grade": "6", "value": "Does not count",
+            "counts": False, "weight": 0, "date": "2026-09-28",
+            "category": "kartkówka", "description": "1 (kartkówka)", "title": "",
+            "teacher": "Anna Nowak", "semester": 1, "type": "numeric",
+        },
+        {
+            "subject": "historia", "grade": "4", "value": "Does not count",
+            "counts": False, "weight": 0, "date": "2026-09-20",
+            "category": "kartkówka", "description": "", "title": "",
+            "teacher": "Jan Kowal", "semester": 1, "type": "numeric",
+        },
+    ])
+    client.async_get_messages = AsyncMock(return_value=[])
+    client.async_get_schedule_events = AsyncMock(return_value=[])
+    client.async_get_timetable_events = AsyncMock(return_value=[])
+    client.async_get_attendance = AsyncMock(return_value=[])
+    client.async_get_homework = AsyncMock(return_value=[])
+    client.async_get_announcements = AsyncMock(return_value=[])
+    return client
+
+
+async def test_coordinator_links_corrections_within_a_subject(
+    hass: HomeAssistant, fake_client_with_correction
+):
+    coordinator = LibrusDataUpdateCoordinator(hass, fake_client_with_correction)
+    await coordinator.async_refresh()
+    await hass.async_block_till_done()
+
+    by_subj = coordinator.data["grades_by_subject"]
+    original, correction = by_subj["matematyka"]
+    assert correction["correction_of"] == {
+        "grade": "1", "category": "kartkówka", "date": "2026-09-17",
+    }
+    assert original["corrected_by"] == {
+        "grade": "6", "category": "kartkówka", "date": "2026-09-28",
+    }
+    # Another subject's identical-looking grades are never pulled in.
+    (history,) = by_subj["historia"]
+    assert history["correction_of"] is None
+    assert history["corrected_by"] is None
+
+
+async def test_subject_sensor_grade_details_expose_correction_links(
+    hass: HomeAssistant, fake_client_with_correction, mock_entry_in_hass
+):
+    coordinator = LibrusDataUpdateCoordinator(
+        hass, fake_client_with_correction, config_entry=mock_entry_in_hass
+    )
+    await coordinator.async_refresh()
+    await hass.async_block_till_done()
+
+    sensor = LibrusSubjectGradesSensor(coordinator, "matematyka", mock_entry_in_hass)
+    details = sensor.extra_state_attributes["grade_details"]
+
+    by_grade = {d["grade"]: d for d in details}
+    assert by_grade["6"]["correction_of"]["date"] == "2026-09-17"
+    assert by_grade["6"]["corrected_by"] is None
+    assert by_grade["1"]["corrected_by"]["grade"] == "6"
+    assert by_grade["1"]["correction_of"] is None

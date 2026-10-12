@@ -42,6 +42,7 @@ from .const import (
     OPT_QUIET_START,
     SCAN_INTERVAL,
 )
+from .grade_corrections import link_grade_corrections
 from .humanize import (
     is_school_day,
     jitter_pause_seconds,
@@ -641,6 +642,12 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     "type": grade.get("type", "numeric"),
                     "is_recent": _is_recent(grade["date"]),
                 })
+            # Correction links are resolved per subject (a "Poprawa oceny" only
+            # ever refers to a grade of the same subject).
+            grades_by_subject = {
+                subject: link_grade_corrections(subject_grades)
+                for subject, subject_grades in grades_by_subject.items()
+            }
 
             # Delta fetch: messages contains only NEW entries. Merge with
             # previously cached ones (deduplicated by href) so the full inbox
