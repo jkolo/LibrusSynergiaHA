@@ -114,3 +114,22 @@ async def test_concurrent_calls_keep_all_cards(
     for p in paths:
         assert urls.count(f"{p}?v=4.0.0") == 1
     assert _OTHER in urls
+
+
+async def test_unloaded_live_collection_is_left_alone(
+    hass: HomeAssistant, hass_storage: dict[str, Any]
+):
+    """Przy starcie kolekcja Lovelace bywa jeszcze niewczytana: async_items()
+    zwraca [], a async_create_item() najpierw wczytuje plik (z naszym wpisem)
+    i dokłada drugi — stąd duplikat messages-card w produkcji. Plik wystarczy."""
+    hass_storage["lovelace_resources"] = _storage(f"{_PATH}?v=old")
+    live = _FakeResources([])
+    live.loaded = False
+    hass.data["lovelace"] = type("LovelaceData", (), {"resources": live})()
+
+    await _async_ensure_lovelace_resource(hass, f"{_PATH}?v=new")
+    await hass.async_block_till_done()
+
+    assert live.items == []
+    urls = [i["url"] for i in hass_storage["lovelace_resources"]["data"]["items"]]
+    assert urls == [f"{_PATH}?v=new"]
