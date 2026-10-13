@@ -111,3 +111,11 @@ async def test_bad_notes_response_gives_none_without_reauth(hass, make_client, b
     client = make_client({"Notes": body})
     assert await client.async_get_notes() is None
     assert client._token == "fake"
+
+
+async def test_missing_notes_module_warns_once(hass, make_client, caplog):
+    client = make_client({"Notes": {"Status": "Error"}})
+    await client.async_get_notes()
+    await client.async_get_notes()
+    warnings = [r for r in caplog.records if r.levelname == "WARNING" and "Uwagi" in r.message]
+    assert len(warnings) == 1
