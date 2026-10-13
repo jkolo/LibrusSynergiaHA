@@ -7,4 +7,4 @@ pytest-homeassistant-custom-component>=0.13.0
 pytest-asyncio>=0.20.0
 
 # Librus APIX library (pinned in manifest.json)
-librus-apix==1.5.1
+librus-apix==1.6.0
