@@ -24,6 +24,16 @@ export interface MessageListResponse {
   total_count: number;
 }
 
+/**
+ * Link between a correcting grade and the grade it replaces. `date` is `null`
+ * on `correction_of` when the integration could not identify the original.
+ */
+export interface HassGradeRef {
+  grade: string | null;
+  category: string | null;
+  date: string | null;
+}
+
 export interface HassGrade {
   subject: string;
   grade: string;
@@ -37,6 +47,10 @@ export interface HassGrade {
   comment: string;
   teacher: string;
   is_recent: boolean;
+  /** Set on a correction: the grade it replaces. */
+  correction_of?: HassGradeRef | null;
+  /** Set on a replaced grade: the grade that corrected it. */
+  corrected_by?: HassGradeRef | null;
 }
 
 export interface LibrusGradesCardConfig {
