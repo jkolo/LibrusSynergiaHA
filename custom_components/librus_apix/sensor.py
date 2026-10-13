@@ -415,20 +415,29 @@ def _val_absences_count(data: dict[str, Any]) -> StateType:
     )
 
 
+# Atrybuty nieobecnosci: N najnowszych wpisow — limit 16 KB recordera
+# (produkcja: 63 nieobecnosci = 26,5 KB). Pelne dane: kalendarz Obecnosci.
+_ABSENCES_ATTR_MAX = 30
+_LATES_ATTR_MAX = 15
+
+
 def _attrs_absences(data: dict[str, Any]) -> dict[str, Any]:
-    entries = data.get("attendance") or []
+    entries = data.get("attendance") or []  # rosnaco po dacie
     absences = [e for e in entries if e.get("is_absence")]
     lates = [e for e in entries if e.get("is_late")]
     excused = [e for e in entries if e.get("is_excused")]
     unjustified = [e for e in entries if e.get("is_unjustified")]
+    shown_absences = absences[-_ABSENCES_ATTR_MAX:]
+    shown_lates = lates[-_LATES_ATTR_MAX:]
     return {
         "total_absences": len(absences),
         "unjustified_count": len(unjustified),
         "excused_count": len(excused),
         "lates_count": len(lates),
-        "absences": [_absence_view(e) for e in absences],
-        "lates": [_absence_view(e) for e in lates],
-        "excused": [_absence_view(e) for e in excused],
+        "absences": [_absence_view(e) for e in shown_absences],
+        "absences_truncated": len(shown_absences) < len(absences),
+        "lates": [_absence_view(e) for e in shown_lates],
+        "lates_truncated": len(shown_lates) < len(lates),
         "absence_dates": [e.get("date", "") for e in absences],
         "late_dates": [e.get("date", "") for e in lates],
     }
