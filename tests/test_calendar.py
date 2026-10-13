@@ -425,3 +425,12 @@ async def test_setup_entry_creates_five_calendars(
     assert f"{mock_config_entry.entry_id}_calendar_oceny" in unique_ids
     assert f"{mock_config_entry.entry_id}_calendar_zadania" in unique_ids
     assert len(calendar_entries) == 5
+
+
+def test_schedule_reading_has_lektura_tag():
+    ev = _schedule_event_to_calendar_event({
+        "date": "2026-10-19", "title": "Inne.", "subject": "język polski",
+        "event_type": "reading",
+        "description": "Lektury - Katarynka, Janko Muzykant.",
+    })
+    assert ev.summary.startswith("📖 [LEKTURA] język polski")

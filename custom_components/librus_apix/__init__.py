@@ -683,6 +683,11 @@ class LibrusApiClient:
                     event_type = "essay_test"
                 elif "test " in haystack:
                     event_type = "test"
+                elif "lektur" in f"{haystack} {_fold_pl(str(data_dict.get('Opis', '')))}":
+                    # Lektury nie maja kategorii w Librusie — wpis "Inne." z
+                    # opisem "Lektury - ...". Opis sprawdzamy tylko tutaj (po
+                    # sprawdzianach), zeby "Sprawdzian z lektury" zostal exam.
+                    event_type = "reading"
                 else:
                     event_type = "other"
                 is_exam = event_type in (
