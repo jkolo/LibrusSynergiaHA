@@ -181,6 +181,18 @@ Legenda ikon:
 - ⚫ szara = przeczytana
 - 📎 badge = ma załącznik
 
+### Karta sprawdzianów i lektur (`librus-schedule-card`)
+
+Karta dostarczana z integracją (rejestruje się sama). Pokazuje nadchodzące sprawdziany i kartkówki z liczbą dni do terminu (czerwone: dziś/jutro, pomarańczowe: do 3 dni) oraz lektury z terminarza. Lektury nie mają w Librusie własnej kategorii — integracja rozpoznaje je po słowie „lektur” w tytule lub opisie wpisu (`event_type: reading`).
+
+```yaml
+type: custom:librus-schedule-card
+entity: sensor.librus_<dziecko>_terminarz
+# title: Sprawdziany i lektury
+# show_exams: true
+# show_readings: true
+```
+
 ### Karta terminarza (wszystkie wpisy)
 
 > Znajdź nazwę encji w **Developer Tools → States** (szukaj `terminarz`).

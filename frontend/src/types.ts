@@ -90,3 +90,20 @@ export interface HassState {
   state: string;
   attributes: Record<string, unknown>;
 }
+
+/** Compact schedule (terminarz) entry from `sensor.<uczeń>_terminarz` → `events`. */
+export interface HassScheduleEvent {
+  date: string;
+  weekday: string;
+  title: string;
+  subject: string;
+  category: string;
+  description: string;
+  teacher: string;
+  hour: string;
+  lesson_number: number | string | null;
+  event_type: string;
+  is_exam: boolean;
+  is_day_off: boolean;
+  days_until: number;
+}

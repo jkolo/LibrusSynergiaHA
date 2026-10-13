@@ -127,3 +127,35 @@ async def test_school_day_off_still_detected(hass, client):
     )
     assert result[0]["event_type"] == "day_off"
     assert result[0]["is_day_off"] is True
+
+
+# ---------------------------------------------------------------------------
+# Lektury: Librus nie ma dla nich kategorii — wpis „Inne.” z opisem
+# „Lektury - Katarynka, Janko Muzykant.” (dane z produkcji, 2026-10-13)
+# ---------------------------------------------------------------------------
+
+
+async def test_reading_detected_from_description(hass, client):
+    event = _raw_event("język polski", "Inne.")
+    event.data = {"Opis": "Lektury - Katarynka, Janko Muzykant."}
+    result = await _fetch(client, event)
+    ev = result[0]
+    assert ev["event_type"] == "reading"
+    assert ev["is_exam"] is False
+    assert ev["is_day_off"] is False
+
+
+async def test_reading_detected_from_title(hass, client):
+    result = await _fetch(
+        client, _raw_event("język polski", "Lektura: W pustyni i w puszczy")
+    )
+    assert result[0]["event_type"] == "reading"
+
+
+async def test_exam_about_a_reading_stays_exam(hass, client):
+    """„Sprawdzian z lektury” to nadal sprawdzian (liczy się do exams_in_*)."""
+    event = _raw_event("język polski", "Sprawdzian")
+    event.data = {"Opis": "Sprawdzian ze znajomości lektury „Katarynka”"}
+    result = await _fetch(client, event)
+    assert result[0]["event_type"] == "exam"
+    assert result[0]["is_exam"] is True
