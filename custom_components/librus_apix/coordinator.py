@@ -276,7 +276,10 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             config_entry=config_entry,
             name=DOMAIN,
             update_interval=_SENTINEL_UPDATE_INTERVAL,
-            always_update=False,
+            # True: encje (m.in. „Ostatnie odświeżenie”) dostają powiadomienie
+            # po każdym cyklu, także gdy dane się nie zmieniły. Niezmieniony
+            # stan nie tworzy nowego wpisu w historii, więc koszt jest pomijalny.
+            always_update=True,
         )
 
     def _issue_id(self, kind: str) -> str:
