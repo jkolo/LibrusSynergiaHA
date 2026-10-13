@@ -483,7 +483,10 @@ class TestAttrsAbsences:
         assert attrs["late_dates"] == []
         assert attrs["absences"] == []
         assert attrs["lates"] == []
-        assert attrs["excused"] == []
+        # Lista `excused` dublowała `absences` (każdy wpis ma is_excused).
+        assert "excused" not in attrs
+        assert attrs["absences_truncated"] is False
+        assert attrs["lates_truncated"] is False
 
     def test_buckets_split_correctly(self, attendance_sample):
         attrs = _attrs_absences({"attendance": attendance_sample})
@@ -503,6 +506,35 @@ class TestAttrsAbsences:
         assert first["period"] == 2
         assert first["teacher"] == "B"
         assert first["is_unjustified"] is True
+
+
+    def test_long_school_year_fits_recorder_limit(self):
+        """Produkcja: 63 nieobecności dawały 26,5 KB > 16 KB recordera."""
+        entries = [
+            {
+                "date": f"2026-{m:02d}-{d:02d}", "subject": "edukacja wczesnoszkolna",
+                "period": p, "teacher": "Kowalska-Nowakowska Anna",
+                "topic": "Temat lekcji " + "x" * 60, "type": "Nieobecność",
+                "symbol": "u" if p % 2 else "nb", "is_absence": True,
+                "is_excused": bool(p % 2), "is_unjustified": not p % 2,
+                "is_late": False,
+            }
+            for m in (9, 10, 11) for d in range(1, 29) for p in (1, 2)
+        ] + [
+            {"date": f"2026-10-{d:02d}", "subject": "matematyka", "period": 1,
+             "teacher": "Jan", "topic": "", "type": "Spóźnienie", "symbol": "sp",
+             "is_absence": False, "is_late": True}
+            for d in range(1, 29)
+        ]
+        attrs = _attrs_absences({"attendance": entries})
+
+        assert attrs["total_absences"] == 168  # liczniki dalej z całości
+        assert attrs["absences_truncated"] is True
+        assert len(attrs["absences"]) == 30
+        # Zostają najnowsze, w kolejności chronologicznej.
+        assert attrs["absences"][-1]["date"] == "2026-11-28"
+        assert len(attrs["absence_dates"]) == 168
+        assert len(json.dumps(attrs, ensure_ascii=False).encode()) < 16_000
 
 
 # ---------------------------------------------------------------------------
