@@ -38,10 +38,14 @@ PARALLEL_UPDATES = 0  # All entities read from coordinator, no per-entity I/O.
 def _grade_average(grades: list[dict]) -> float | None:
     """Compute the numeric average of Polish-style grades (e.g. '4+', '5-').
 
-    Plus modifier adds 0.5; minus subtracts 0.25. Invalid entries are skipped.
+    Plus modifier adds 0.5; minus subtracts 0.25. Invalid entries are skipped,
+    and so are grades that were replaced by a correction (`corrected_by`) —
+    the correction counts instead.
     """
     values: list[float] = []
     for g in grades:
+        if g.get("corrected_by"):
+            continue
         grade_str = g.get("grade", "")
         try:
             base = float(grade_str[0])

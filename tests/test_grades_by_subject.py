@@ -220,3 +220,22 @@ async def test_subject_sensor_grade_details_expose_correction_links(
     assert by_grade["6"]["corrected_by"] is None
     assert by_grade["1"]["corrected_by"]["grade"] == "6"
     assert by_grade["1"]["correction_of"] is None
+
+
+async def test_averages_leave_out_the_corrected_grade(
+    hass: HomeAssistant, fake_client_with_correction, mock_entry_in_hass
+):
+    """1 poprawione na 6 daje średnią 6.0, nie (1 + 6) / 2."""
+    coordinator = LibrusDataUpdateCoordinator(
+        hass, fake_client_with_correction, config_entry=mock_entry_in_hass
+    )
+    await coordinator.async_refresh()
+    await hass.async_block_till_done()
+
+    grades = LibrusSubjectGradesSensor(coordinator, "matematyka", mock_entry_in_hass)
+    average = LibrusSubjectAverageSensor(coordinator, "matematyka", mock_entry_in_hass)
+
+    assert grades.extra_state_attributes["average"] == 6.0
+    assert average.native_value == 6.0
+    # The history still lists both: only the average changes.
+    assert average.extra_state_attributes["grade_count"] == 2

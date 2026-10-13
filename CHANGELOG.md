@@ -18,6 +18,8 @@
 
 ### Naprawiono
 
+- **Średnie nie liczą już ocen, które zostały poprawione.** Poprawiana `1` i jej poprawa `6` dawały średnią 3,5 zamiast 6,0. Dotyczy `sensor.librus_<dziecko>_srednia_<przedmiot>`, atrybutu `average` sensora przedmiotu oraz średniej ogólnej. Historia ocen (`grade_list`, `grade_count`, `grade_details`) pozostaje pełna.
+
 - **`librus-subject-grades-card` pokazywała entity_id zamiast nazwy przedmiotu w nagłówku.** Sensor przedmiotu wystawia teraz atrybut `subject`.
 - **Kartkówki nie były rozpoznawane jako sprawdziany.** Librus pisze „Kartkówka” przez „ó”, a klasyfikator szukał „kartkow”. Wpisy trafiały do `other`, nie liczyły się do `is_exam`/`exams_in_*` i nie tworzyły obowiązków nauki. Klasyfikator porównuje teraz tekst bez polskich znaków.
 - **Nieobecność nauczyciela traktowana jak dzień wolny.** Wpisy „Nieobecność: / Nauczyciel: …” (Librus linkuje je jak dni wolne) dostawały `day_off`, więc `is_school_day` uznawał dzień za wolny i synchronizacja zwalniała (np. wakat nauczyciela zaznaczał tak cały tydzień). Mają teraz osobny typ `teacher_absence` (tag `[NIEOBECNOSC-NAUCZYCIELA]` w kalendarzu) i `is_day_off: false`.
