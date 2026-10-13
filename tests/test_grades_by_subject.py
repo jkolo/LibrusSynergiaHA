@@ -155,20 +155,20 @@ def fake_client_with_correction(mock_student_info):
     client.async_get_student_information = AsyncMock(return_value=mock_student_info)
     client.async_get_grades = AsyncMock(return_value=[
         {
-            "subject": "matematyka", "grade": "1", "value": "Does not count",
-            "counts": False, "weight": 0, "date": "2026-09-17",
+            "subject": "matematyka", "grade": "1", "value": 1.0,
+            "counts": None, "weight": None, "date": "2026-09-17",
             "category": "kartkówka", "description": "", "title": "Ułamki",
             "teacher": "Anna Nowak", "semester": 1, "type": "numeric",
         },
         {
-            "subject": "matematyka", "grade": "6", "value": "Does not count",
-            "counts": False, "weight": 0, "date": "2026-09-28",
+            "subject": "matematyka", "grade": "6", "value": 6.0,
+            "counts": None, "weight": None, "date": "2026-09-28",
             "category": "kartkówka", "description": "1 (kartkówka)", "title": "",
             "teacher": "Anna Nowak", "semester": 1, "type": "numeric",
         },
         {
-            "subject": "historia", "grade": "4", "value": "Does not count",
-            "counts": False, "weight": 0, "date": "2026-09-20",
+            "subject": "historia", "grade": "4", "value": 4.0,
+            "counts": None, "weight": None, "date": "2026-09-20",
             "category": "kartkówka", "description": "", "title": "",
             "teacher": "Jan Kowal", "semester": 1, "type": "numeric",
         },

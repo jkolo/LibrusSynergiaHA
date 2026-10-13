@@ -528,8 +528,10 @@ class LibrusApiClient:
                                 "subject": subject,
                                 "grade": desc_grade.grade,
                                 "value": None,
-                                "counts": False,
-                                "weight": 0,
+                                # Librus nie podaje wagi ocen opisowych — None
+                                # (nie wiemy), False wyrzucaloby je ze sredniej.
+                                "counts": None,
+                                "weight": None,
                                 "date": desc_grade.date,
                                 "category": parsed.get("Umiejętność", ""),
                                 "description": "",
