@@ -267,6 +267,27 @@ def test_grade_to_event_description_contains_full_context():
     assert "tak" in desc.lower() or "true" in desc.lower()
 
 
+def test_grade_to_event_unknown_counts_and_weight_are_omitted():
+    """Librus without weighted averages gives no "Licz do średniej" / "Waga"."""
+    raw = {
+        "subject": "Geografia",
+        "grade": "3",
+        "value": 3.0,
+        "counts": None,
+        "weight": None,
+        "date": "2026-09-27",
+        "category": "sprawdzian",
+        "teacher": "Anna Nowak",
+        "semester": 1,
+        "type": "numeric",
+    }
+    ev = _grade_to_calendar_event(raw)
+    assert ev is not None
+    desc = ev.description or ""
+    assert "Liczy się do średniej" not in desc
+    assert "Waga" not in desc
+
+
 def test_grade_to_event_invalid_date_returns_none():
     raw = {
         "subject": "Mat",

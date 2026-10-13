@@ -38,8 +38,10 @@ export interface HassGrade {
   subject: string;
   grade: string;
   value: number | null;
-  counts: boolean;
-  weight: number;
+  /** null when Librus does not show "Licz do średniej" (no weighted averages). */
+  counts: boolean | null;
+  /** null when Librus does not show "Waga". */
+  weight: number | null;
   date: string;
   category: string;
   description: string;

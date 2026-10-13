@@ -138,7 +138,7 @@ export class LibrusGradesCard extends LitElement {
           <div class="dlg-details">
             ${g.teacher ? html`<div class="dlg-detail-row"><span class="dlg-detail-label">Nauczyciel</span><span>${g.teacher}</span></div>` : nothing}
             ${g.weight != null ? html`<div class="dlg-detail-row"><span class="dlg-detail-label">Waga</span><span>${g.weight}</span></div>` : nothing}
-            <div class="dlg-detail-row"><span class="dlg-detail-label">Liczy do średniej</span><span>${g.counts ? "Tak" : "Nie"}</span></div>
+            ${g.counts != null ? html`<div class="dlg-detail-row"><span class="dlg-detail-label">Liczy do średniej</span><span>${g.counts ? "Tak" : "Nie"}</span></div>` : nothing}
             ${g.title ? html`<div class="dlg-detail-row dlg-detail-row--block"><span class="dlg-detail-label">Temat</span><span class="dlg-detail-text">${g.title}</span></div>` : nothing}
             ${g.correction_of
               ? html`<div class="dlg-detail-row"><span class="dlg-detail-label">Poprawa oceny</span><span>${this._describeRef(g.correction_of)}</span></div>`

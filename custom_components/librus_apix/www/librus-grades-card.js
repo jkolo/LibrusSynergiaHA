@@ -741,7 +741,7 @@ let w = class extends k {
           <div class="dlg-details">
             ${s.teacher ? u`<div class="dlg-detail-row"><span class="dlg-detail-label">Nauczyciel</span><span>${s.teacher}</span></div>` : c}
             ${s.weight != null ? u`<div class="dlg-detail-row"><span class="dlg-detail-label">Waga</span><span>${s.weight}</span></div>` : c}
-            <div class="dlg-detail-row"><span class="dlg-detail-label">Liczy do średniej</span><span>${s.counts ? "Tak" : "Nie"}</span></div>
+            ${s.counts != null ? u`<div class="dlg-detail-row"><span class="dlg-detail-label">Liczy do średniej</span><span>${s.counts ? "Tak" : "Nie"}</span></div>` : c}
             ${s.title ? u`<div class="dlg-detail-row dlg-detail-row--block"><span class="dlg-detail-label">Temat</span><span class="dlg-detail-text">${s.title}</span></div>` : c}
             ${s.correction_of ? u`<div class="dlg-detail-row"><span class="dlg-detail-label">Poprawa oceny</span><span>${this._describeRef(s.correction_of)}</span></div>` : c}
             ${s.corrected_by ? u`<div class="dlg-detail-row"><span class="dlg-detail-label">Poprawiona oceną</span><span>${this._describeRef(s.corrected_by)}</span></div>` : c}
