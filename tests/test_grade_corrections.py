@@ -226,3 +226,16 @@ def test_unparseable_description_still_marks_a_correction():
 
     assert linked[1]["correction_of"] == {"grade": None, "category": None, "date": None}
     assert linked[0]["corrected_by"] is None
+
+
+def test_links_never_form_a_loop():
+    """Two identical same-day corrections must not replace each other."""
+    grades = [
+        _grade("1", "2026-09-28", description="1 (kartkówka)"),
+        _grade("1", "2026-09-28", description="1 (kartkówka)"),
+    ]
+
+    linked = link_grade_corrections(grades)
+
+    replaced = [g for g in linked if g["corrected_by"] is not None]
+    assert len(replaced) <= 1

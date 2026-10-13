@@ -81,6 +81,19 @@ def link_grade_corrections(grades: list[dict[str, Any]]) -> list[dict[str, Any]]
     # Oldest correction first, so a chain (1 -> 3 -> 5) resolves in order.
     corrections.sort(key=lambda item: item[:2])
 
+    replaces: dict[int, int] = {}  # correction index -> replaced grade's index
+
+    def _closes_loop(original: int, correction: int) -> bool:
+        """True when `original` is itself (transitively) a correction of `correction`."""
+        seen: set[int] = set()
+        current: int | None = original
+        while current is not None and current not in seen:
+            if current == correction:
+                return True
+            seen.add(current)
+            current = replaces.get(current)
+        return False
+
     for _, index, parsed in corrections:
         correction = linked[index]
         reference: dict[str, str | None] = {
@@ -93,7 +106,7 @@ def link_grade_corrections(grades: list[dict[str, Any]]) -> list[dict[str, Any]]
             continue
 
         candidates = [
-            other
+            position
             for position, other in enumerate(linked)
             if position != index
             and other["corrected_by"] is None
@@ -104,10 +117,11 @@ def link_grade_corrections(grades: list[dict[str, Any]]) -> list[dict[str, Any]]
             )
             and not _is_later(other.get("date"), correction.get("date"))
         ]
-        if len(candidates) != 1:
+        if len(candidates) != 1 or _closes_loop(candidates[0], index):
             continue
 
-        original = candidates[0]
+        replaces[index] = candidates[0]
+        original = linked[candidates[0]]
         reference["date"] = original.get("date")
         original["corrected_by"] = {
             "grade": correction.get("grade"),
