@@ -282,7 +282,7 @@ def _grade_to_calendar_event(raw: dict) -> CalendarEvent | None:
     weight = raw.get("weight")
     if weight is not None and weight != "":
         desc_parts.append(f"Waga: {weight}")
-    if "counts" in raw:
+    if raw.get("counts") is not None:
         desc_parts.append(
             f"Liczy się do średniej: {'tak' if raw.get('counts') else 'nie'}"
         )

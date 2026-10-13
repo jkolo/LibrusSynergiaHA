@@ -131,10 +131,12 @@ export class LibrusSubjectGradesCard extends LitElement {
                       <span>${g.weight}</span>
                     </div>`
                   : nothing}
-                <div class="dlg-detail-row">
-                  <span class="dlg-detail-label">Liczy do średniej</span>
-                  <span>${g.counts ? "Tak" : "Nie"}</span>
-                </div>
+                ${g.counts != null
+                  ? html`<div class="dlg-detail-row">
+                      <span class="dlg-detail-label">Liczy do średniej</span>
+                      <span>${g.counts ? "Tak" : "Nie"}</span>
+                    </div>`
+                  : nothing}
                 ${g.title
                   ? html`<div class="dlg-detail-row dlg-detail-row--block">
                       <span class="dlg-detail-label">Temat</span>

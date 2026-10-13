@@ -745,10 +745,10 @@ let w = class extends k {
                       <span class="dlg-detail-label">Waga</span>
                       <span>${s.weight}</span>
                     </div>` : c}
-                <div class="dlg-detail-row">
-                  <span class="dlg-detail-label">Liczy do średniej</span>
-                  <span>${s.counts ? "Tak" : "Nie"}</span>
-                </div>
+                ${s.counts != null ? p`<div class="dlg-detail-row">
+                      <span class="dlg-detail-label">Liczy do średniej</span>
+                      <span>${s.counts ? "Tak" : "Nie"}</span>
+                    </div>` : c}
                 ${s.title ? p`<div class="dlg-detail-row dlg-detail-row--block">
                       <span class="dlg-detail-label">Temat</span>
                       <span class="dlg-detail-text">${s.title}</span>

@@ -273,6 +273,37 @@ def _parse_descriptive_desc(desc: str) -> dict[str, str]:
     return result
 
 
+_COUNTS_RE = re.compile(r"Licz do średniej:\s*(\w+)", re.IGNORECASE)
+_WEIGHT_RE = re.compile(r"Waga:\s*(\d+)")
+
+
+def _tooltip_counts_and_weight(desc: str) -> tuple[bool | None, int | None]:
+    """Read "Licz do średniej" and "Waga" from a grade tooltip.
+
+    librus-apix defaults both to False / 0 when the lines are missing, but
+    schools without weighted averages never show them — so a missing line
+    means "Librus does not say" (None), not "does not count".
+    """
+    counts_match = _COUNTS_RE.search(desc)
+    counts = counts_match.group(1).lower() == "tak" if counts_match else None
+    weight_match = _WEIGHT_RE.search(desc)
+    weight = int(weight_match.group(1)) if weight_match else None
+    return counts, weight
+
+
+def _grade_numeric_value(grade: str) -> float | None:
+    """Numeric value of a Polish grade ('4+' → 4.5, '3-' → 2.75), else None."""
+    grade = grade.strip()
+    if not grade or not grade[0].isdigit():
+        return None
+    value = float(grade[0])
+    if "+" in grade[1:]:
+        value += 0.5
+    elif "-" in grade[1:]:
+        value -= 0.25
+    return value
+
+
 def _current_semester() -> int:
     """Return current Polish school-year semester (1 or 2).
 
@@ -454,21 +485,19 @@ class LibrusApiClient:
                     for grade in grades_list:
                         if grade.semester != current_sem:
                             continue
-                        # `value` is a property — może rzucić ValueError dla
-                        # zachowaniowych ocen typu "A+". Cache w try by nie
-                        # wywalić całego fetcha.
-                        try:
-                            value = grade.value
-                        except ValueError:
-                            value = None
+                        # Nie używamy `grade.value` / `grade.counts` /
+                        # `grade.weight` z biblioteki — przy braku linii
+                        # "Licz do średniej" w tooltipie zwraca False / 0 /
+                        # "Does not count" zamiast "brak informacji".
                         _desc_raw = getattr(grade, "desc", "") or ""
                         _parsed = _parse_descriptive_desc(_desc_raw)
+                        counts, weight = _tooltip_counts_and_weight(_desc_raw)
                         all_grades.append({
                             "subject": subject,
                             "grade": grade.grade,
-                            "value": value,
-                            "counts": grade.counts,
-                            "weight": grade.weight,
+                            "value": _grade_numeric_value(grade.grade),
+                            "counts": counts,
+                            "weight": weight,
                             "date": grade.date,
                             "category": grade.category,
                             "description": _parsed.get("Poprawa oceny", ""),
