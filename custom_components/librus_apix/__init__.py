@@ -396,6 +396,8 @@ class LibrusApiClient:
         self._rng = rng or random.Random()
         # Konto bez modulu ocen (LukMaverick/LibrusSynergiaHA#10) — loguj raz.
         self._grades_module_missing = False
+        # Szkola bez uwag w gateway API — ostrzegaj raz, potem debug.
+        self._notes_warned = False
         self._humanize = humanize
         # UA wybrany raz przy starcie integracji — przeglądarka też nie
         # zmienia UA mid-session. Stabilny do reloadu.
@@ -970,8 +972,9 @@ class LibrusApiClient:
 
         Pola: `id`, `date` (YYYY-MM-DD), `text`, `kind`
         (positive/negative/neutral/other), `category`, `teacher`. Lista od
-        najnowszej. GET na JSON API niczego nie oznacza jako przeczytane
-        (w odroznieniu od otwierania wiadomosci).
+        najnowszej. GET na JSON API nie powinien niczego oznaczac jako
+        przeczytane (w odroznieniu od otwierania wiadomosci) — niesprawdzone
+        na licznikach "nowych" uwag w Librusie.
 
         Bledna odpowiedz `Notes` (np. szkola bez modulu uwag) daje None bez
         wyjatku — wyjatek w _with_retry resetowalby logowanie co cykl.
@@ -982,11 +985,12 @@ class LibrusApiClient:
             try:
                 payload = client.get(_GATEWAY_NOTES).json()
             except ValueError:
-                _LOGGER.warning("Uwagi: odpowiedź gateway API to nie JSON")
-                return None
+                payload = None
             notes = payload.get("Notes") if isinstance(payload, dict) else None
             if notes is None:
-                _LOGGER.warning("Uwagi: brak pola 'Notes' w odpowiedzi: %s", str(payload)[:200])
+                log = _LOGGER.debug if self._notes_warned else _LOGGER.warning
+                log("Uwagi: brak pola 'Notes' w odpowiedzi gateway API: %s", str(payload)[:200])
+                self._notes_warned = True
                 return None
             if not notes:
                 return []
