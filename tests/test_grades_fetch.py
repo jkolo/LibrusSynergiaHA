@@ -100,3 +100,42 @@ async def test_descriptive_digit_grade_has_unknown_counts_and_weight(hass, clien
     g = next(r for r in result if r["type"] == "descriptive")
     assert g["counts"] is None
     assert g["weight"] is None
+
+
+# ---------------------------------------------------------------------------
+# Konto bez modułu ocen (np. zerówka) — LukMaverick/LibrusSynergiaHA#10.
+# Librus odpowiada "Brak dostępu", a librus-apix zamienia to na TokenError,
+# tak samo jak przy wygasłym tokenie.
+# ---------------------------------------------------------------------------
+
+
+async def test_no_grades_module_with_valid_token_gives_empty_list(hass, client):
+    from librus_apix.exceptions import TokenError
+
+    with (
+        patch("custom_components.librus_apix.get_grades", side_effect=TokenError("Brak dostępu")),
+        patch("custom_components.librus_apix.get_student_information", return_value=MagicMock()),
+    ):
+        result = await client.async_get_grades()
+
+    assert result == []
+    assert client._token == "fake"  # nie było ponownego logowania
+
+
+async def test_expired_token_still_triggers_reauth(hass, client):
+    from librus_apix.exceptions import TokenError
+
+    from custom_components.librus_apix import LibrusAuthError
+
+    async def _reauth():
+        client._client = MagicMock()
+        client._token = "fresh"
+        return True
+
+    with (
+        patch("custom_components.librus_apix.get_grades", side_effect=TokenError("expired")),
+        patch("custom_components.librus_apix.get_student_information", side_effect=TokenError("expired")),
+        patch.object(client, "async_authenticate", side_effect=_reauth),
+        pytest.raises(LibrusAuthError),
+    ):
+        await client.async_get_grades()

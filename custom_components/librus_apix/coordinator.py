@@ -563,7 +563,9 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 # Fall back to cached grades if available; refresh other slots
                 # if their fetches succeeded.
                 prev = self.data or {}
-                if not prev.get("grades"):
+                # `is None`, nie `not`: pusta lista to poprawny cache konta
+                # bez modulu ocen.
+                if prev.get("grades") is None:
                     raise UpdateFailed("Failed to fetch grades and no cache available")
                 _LOGGER.warning(
                     "Failed to fetch grades — using cached values"

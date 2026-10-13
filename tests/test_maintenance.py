@@ -172,3 +172,23 @@ async def test_update_data_maintenance_exception_falls_back_to_cache(
     assert mock_config_entry.state is ConfigEntryState.LOADED
     # Data preserved from cache
     assert coordinator.data is not None
+
+
+async def test_account_without_grades_loads_and_survives_failed_refresh(
+    hass: HomeAssistant, mock_config_entry, mock_librus_client
+) -> None:
+    """Konto bez ocen: pusta lista w cache to poprawne dane, nie brak cache."""
+    mock_librus_client.async_get_grades = AsyncMock(return_value=[])
+    mock_config_entry.add_to_hass(hass)
+
+    assert await hass.config_entries.async_setup(mock_config_entry.entry_id)
+    await hass.async_block_till_done()
+    assert mock_config_entry.state is ConfigEntryState.LOADED
+
+    coordinator = mock_config_entry.runtime_data.coordinator
+    mock_librus_client.async_get_grades = AsyncMock(return_value=None)
+    await coordinator.async_refresh()
+    await hass.async_block_till_done()
+
+    assert coordinator.last_update_success is True
+    assert coordinator.data["grades"] == []

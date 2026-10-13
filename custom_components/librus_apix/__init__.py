@@ -309,6 +309,15 @@ def _grade_numeric_value(grade: str) -> float | None:
     return value
 
 
+def _token_still_valid(client: Client) -> bool:
+    """True gdy token dziala — sonda na stronie informacji o uczniu."""
+    try:
+        get_student_information(client)
+    except Exception:  # noqa: BLE001 — kazda porazka = nie wiemy, traktuj jak wygasly
+        return False
+    return True
+
+
 def _current_semester() -> int:
     """Return current Polish school-year semester (1 or 2).
 
@@ -349,6 +358,8 @@ class LibrusApiClient:
         self._token: Any | None = None
         self._auth_lock = asyncio.Lock()
         self._rng = rng or random.Random()
+        # Konto bez modulu ocen (LukMaverick/LibrusSynergiaHA#10) — loguj raz.
+        self._grades_module_missing = False
         self._humanize = humanize
         # UA wybrany raz przy starcie integracji — przeglądarka też nie
         # zmienia UA mid-session. Stabilny do reloadu.
@@ -480,7 +491,24 @@ class LibrusApiClient:
         _LOGGER.debug("Filtrowanie ocen dla semestru %d", current_sem)
 
         def _work(client: Client) -> list[dict[str, Any]]:
-            numeric_grades, _avg, descriptive_grades = get_grades(client, "all")
+            try:
+                numeric_grades, _avg, descriptive_grades = get_grades(client, "all")
+            except TokenError:
+                # "Brak dostępu" przy ocenach: librus-apix zglasza to jako
+                # TokenError, tak jak wygasly token. Konto bez modulu ocen
+                # (np. zerowka) ma jednak wazny token — sprawdzamy to na
+                # stronie informacji o uczniu. Wygasly token idzie dalej do
+                # _with_retry (re-auth).
+                if not _token_still_valid(client):
+                    raise
+                if not self._grades_module_missing:
+                    _LOGGER.info(
+                        "Konto nie ma modułu ocen (Brak dostępu przy ważnym "
+                        "tokenie) — oceny będą puste"
+                    )
+                    self._grades_module_missing = True
+                return []
+            self._grades_module_missing = False
 
             all_grades: list[dict[str, Any]] = []
 
