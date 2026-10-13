@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
 import random
 import re
@@ -96,24 +97,41 @@ PLATFORMS = ["sensor", "calendar", "event"]
 
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 
-_MESSAGES_CARD_PATH = "/librus_apix/librus-messages-card.js"
-_GRADES_CARD_PATH = "/librus_apix/librus-grades-card.js"
-_SUBJECT_GRADES_CARD_PATH = "/librus_apix/librus-subject-grades-card.js"
-_SCHEDULE_CARD_PATH = "/librus_apix/librus-schedule-card.js"
-
-# Odczyt manifestu przy załadowaniu modułu (poza event loop) — cache bust dla karty Lovelace.
-try:
-    import json as _json
-    _CARD_VERSION: str = _json.loads(
-        (Path(__file__).parent / "manifest.json").read_text()
-    )["version"]
-except Exception:  # noqa: BLE001
-    _CARD_VERSION = ""
+# Karty Lovelace dostarczane z integracja (plik w www/ -> URL).
+_CARD_FILES = (
+    "librus-messages-card.js",
+    "librus-grades-card.js",
+    "librus-subject-grades-card.js",
+    "librus-schedule-card.js",
+)
+_CARD_URL_PREFIX = "/librus_apix/"
 
 
-def _card_url(path: str) -> str:
-    """Zwróć URL karty z ?v= z manifest.json — bust cache przy update."""
-    return f"{path}?v={_CARD_VERSION}" if _CARD_VERSION else path
+def _card_versions(www_dir: Path) -> dict[str, str]:
+    """Wersja (?v=) kazdej karty z hasha tresci pliku; usuwa stare *.js.gz.
+
+    Wersja z manifestu nie zmieniala sie przy przebudowie JS, wiec
+    przegladarki trzymaly stara karte pod tym samym URL. aiohttp podaje
+    klientom z gzip sasiedni .gz — .gz starszy od .js (albo bez .js)
+    zaslanialby nowa karte, wiec go usuwamy. Wolac w executorze (I/O).
+    """
+    if not www_dir.is_dir():
+        return {}
+    for gz in www_dir.glob("*.js.gz"):
+        source = gz.with_suffix("")
+        try:
+            if not source.exists() or gz.stat().st_mtime < source.stat().st_mtime:
+                gz.unlink()
+                _LOGGER.info("Removed stale %s", gz.name)
+        except OSError as err:
+            _LOGGER.warning("Could not remove stale %s: %s", gz.name, err)
+    versions: dict[str, str] = {}
+    for js in www_dir.glob("*.js"):
+        try:
+            versions[js.name] = hashlib.sha256(js.read_bytes()).hexdigest()[:10]
+        except OSError:
+            continue
+    return versions
 
 
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
@@ -121,23 +139,16 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     www_dir = Path(__file__).parent / "www"
     if hass.http is None:
         return True
+    versions = await hass.async_add_executor_job(_card_versions, www_dir)
     static_paths: list[StaticPathConfig] = []
-    messages_js = www_dir / "librus-messages-card.js"
-    if messages_js.exists():
-        static_paths.append(StaticPathConfig(_MESSAGES_CARD_PATH, str(messages_js), cache_headers=False))
-        hass.async_create_task(_async_ensure_lovelace_resource(hass, _card_url(_MESSAGES_CARD_PATH)))
-    grades_js = www_dir / "librus-grades-card.js"
-    if grades_js.exists():
-        static_paths.append(StaticPathConfig(_GRADES_CARD_PATH, str(grades_js), cache_headers=False))
-        hass.async_create_task(_async_ensure_lovelace_resource(hass, _card_url(_GRADES_CARD_PATH)))
-    subject_grades_js = www_dir / "librus-subject-grades-card.js"
-    if subject_grades_js.exists():
-        static_paths.append(StaticPathConfig(_SUBJECT_GRADES_CARD_PATH, str(subject_grades_js), cache_headers=False))
-        hass.async_create_task(_async_ensure_lovelace_resource(hass, _card_url(_SUBJECT_GRADES_CARD_PATH)))
-    schedule_js = www_dir / "librus-schedule-card.js"
-    if schedule_js.exists():
-        static_paths.append(StaticPathConfig(_SCHEDULE_CARD_PATH, str(schedule_js), cache_headers=False))
-        hass.async_create_task(_async_ensure_lovelace_resource(hass, _card_url(_SCHEDULE_CARD_PATH)))
+    for name in _CARD_FILES:
+        js = www_dir / name
+        if not js.exists():
+            continue
+        path = f"{_CARD_URL_PREFIX}{name}"
+        static_paths.append(StaticPathConfig(path, str(js), cache_headers=False))
+        url = f"{path}?v={versions[name]}" if name in versions else path
+        hass.async_create_task(_async_ensure_lovelace_resource(hass, url))
     if static_paths:
         await hass.http.async_register_static_paths(static_paths)
         _LOGGER.debug("Librus Lovelace cards registered: %s", [p.url_path for p in static_paths])
@@ -203,7 +214,10 @@ async def _async_ensure_lovelace_resource_locked(hass: HomeAssistant, url: str) 
     # hass.data["lovelace"] to LovelaceData (obiekt, nie dict) — uzywamy getattr
     _lovelace_data = hass.data.get("lovelace")
     lovelace_resources = getattr(_lovelace_data, "resources", None) if _lovelace_data is not None else None
-    if lovelace_resources is not None:
+    # Niewczytana kolekcja (start HA) zwraca [] z async_items(), a
+    # async_create_item() najpierw wczytuje plik — z wpisem zapisanym wyzej —
+    # i dokladal duplikat. Po wczytaniu kolekcja i tak przeczyta nasz plik.
+    if lovelace_resources is not None and getattr(lovelace_resources, "loaded", True):
         try:
             live_matching = [i for i in lovelace_resources.async_items() if _matches(i)]
             if not live_matching:
