@@ -14,8 +14,11 @@
 - **Nowe encje zdarzeń:** `new_homework` (nowe zadanie domowe) i `new_schedule_event` (każdy nowy wpis w terminarzu, nie tylko sprawdzian).
 - README: przykładowe karty terminarza, sprawdzianów i zadań domowych.
 - **Karta `librus-grades-card` sama wykrywa przedmioty.** Zamiast listy `entities` wystarczy `entity:` z dowolną encją ucznia (np. `sensor.librus_<dziecko>_grades`). Karta zbiera wszystkie sensory z `grade_details` z tego samego urządzenia. Stała lista psuła się przy zmianie przedmiotów (np. przejście z edukacji wczesnoszkolnej do klasy 4) i karta zostawała pusta, mimo że oceny były w HA. `entities` nadal działa i jest dołączane do wykrytych encji.
+- **Poprawy ocen są powiązane z poprawianą oceną.** Librus oznacza poprawę tylko linią „Poprawa oceny: 1 (kartkówka)” (ocena i kategoria, bez daty), a samej poprawianej oceny nie wyróżnia. Integracja dopasowuje ją w obrębie przedmiotu po wartości i kategorii (z datą nie późniejszą niż poprawa) i dodaje do każdego wpisu w `grade_details` pola `correction_of` (na poprawie: `grade`, `category`, `date` poprawianej oceny) oraz `corrected_by` (na poprawianej ocenie: ocena, która ją poprawiła). Gdy pasuje kilka ocen, poprawa pozostaje niepowiązana (`date: null`), zamiast zgadywać. Karta `librus-subject-grades-card` pokazuje poprawę jako `1 → 6` (poprawiana ocena przekreślona), a `librus-grades-card` oznacza wiersz plakietką „POPRAWA”, a poprawianą ocenę przygasza i przekreśla; okno szczegółów podaje, co zostało poprawione i kiedy.
 
 ### Naprawiono
+
+- **Średnie nie liczą już ocen, które zostały poprawione.** Poprawiana `1` i jej poprawa `6` dawały średnią 3,5 zamiast 6,0. Dotyczy `sensor.librus_<dziecko>_srednia_<przedmiot>`, atrybutu `average` sensora przedmiotu oraz średniej ogólnej. Historia ocen (`grade_list`, `grade_count`, `grade_details`) pozostaje pełna.
 
 - **`librus-subject-grades-card` pokazywała entity_id zamiast nazwy przedmiotu w nagłówku.** Sensor przedmiotu wystawia teraz atrybut `subject`.
 - **Kartkówki nie były rozpoznawane jako sprawdziany.** Librus pisze „Kartkówka” przez „ó”, a klasyfikator szukał „kartkow”. Wpisy trafiały do `other`, nie liczyły się do `is_exam`/`exams_in_*` i nie tworzyły obowiązków nauki. Klasyfikator porównuje teraz tekst bez polskich znaków.

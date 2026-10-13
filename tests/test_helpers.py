@@ -44,6 +44,18 @@ class TestGradeAverage:
             {"grade": "abc"},
         ]) == 5.0
 
+    def test_corrected_grade_is_left_out(self):
+        # A grade that was replaced by a correction no longer counts.
+        replaced = {"grade": "1", "corrected_by": {"grade": "6", "date": "2026-09-28"}}
+        assert _grade_average([replaced, {"grade": "6"}]) == 6.0
+
+    def test_correction_itself_counts(self):
+        correction = {"grade": "6", "correction_of": {"grade": "1", "date": "2026-09-17"}}
+        assert _grade_average([correction, {"grade": "4"}]) == 5.0
+
+    def test_grades_without_link_keys_are_unaffected(self):
+        assert _grade_average([{"grade": "1", "corrected_by": None}, {"grade": "5"}]) == 3.0
+
 
 class TestIsRecent:
     """_is_recent — date freshness within last 24h window."""

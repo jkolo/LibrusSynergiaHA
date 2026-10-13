@@ -1,28 +1,14 @@
 import { LitElement, html, css, nothing } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
-import type { HassGrade, HomeAssistant } from "./types.js";
+import type { HassGrade, HassGradeRef, HomeAssistant } from "./types.js";
+import { formatDate, parseDateForSort } from "./grade-format.js";
+import { collapseCorrections, correctionNote, supersededNote } from "./grade-corrections.js";
+import type { GradeEntry } from "./grade-corrections.js";
 
 interface LibrusSubjectGradesCardConfig {
   type: string;
   entity: string;
   title?: string;
-}
-
-function parseDateForSort(dateStr: string): number {
-  if (/^\d{2}\.\d{2}\.\d{4}$/.test(dateStr)) {
-    const [d, m, y] = dateStr.split(".");
-    return new Date(`${y}-${m}-${d}`).getTime();
-  }
-  return new Date(dateStr).getTime();
-}
-
-function formatDate(dateStr: string): string {
-  if (/^\d{2}\.\d{2}\.\d{4}$/.test(dateStr)) return dateStr;
-  if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
-    const [y, m, d] = dateStr.split("-");
-    return `${d}.${m}.${y}`;
-  }
-  return dateStr;
 }
 
 function gradeTypeInfo(category: string): { cssClass: string } {
@@ -81,6 +67,41 @@ export class LibrusSubjectGradesCard extends LitElement {
     this._selectedGrade = null;
   }
 
+  private _describeRef(ref: HassGradeRef): string {
+    const grade = [ref.grade, ref.category ? `(${ref.category})` : ""].filter(Boolean).join(" ");
+    return [grade || "—", ref.date ? formatDate(ref.date) : ""].filter(Boolean).join(" · ");
+  }
+
+  private _renderChip(g: HassGrade) {
+    const note = correctionNote(g) ?? supersededNote(g);
+    const title = `${g.category}${g.date ? " · " + formatDate(g.date) : ""}${note ? " — " + note : ""}`;
+    return html`<span
+      class="grade-chip ${gradeTypeInfo(g.category).cssClass} ${g.is_recent ? "recent" : ""} ${g.corrected_by ? "superseded" : ""}"
+      role="button"
+      tabindex="0"
+      title="${title}"
+      @click="${() => this._openDialog(g)}"
+      @keydown="${(e: KeyboardEvent) => e.key === "Enter" && this._openDialog(g)}"
+    >${g.grade}</span>`;
+  }
+
+  /** A grade, preceded by what it replaced: `1 → 6` (or `1 → 3 → 5` for a chain). */
+  private _renderEntry(entry: GradeEntry) {
+    const { grade, replaced } = entry;
+    // The original may be unknown while Librus still names the replaced grade.
+    const unknownFrom = replaced.length === 0 ? grade.correction_of?.grade : null;
+    if (replaced.length === 0 && !unknownFrom) return this._renderChip(grade);
+    return html`<span class="chain" aria-label="${correctionNote(grade) ?? ""}">
+      ${replaced.map(
+        r => html`${this._renderChip(r)}<span class="arrow" aria-hidden="true">→</span>`
+      )}
+      ${unknownFrom
+        ? html`<span class="grade-from" title="${correctionNote(grade) ?? ""}">${unknownFrom}</span><span class="arrow" aria-hidden="true">→</span>`
+        : nothing}
+      ${this._renderChip(grade)}
+    </span>`;
+  }
+
   private _renderDialog() {
     const g = this._selectedGrade;
     return html`
@@ -92,7 +113,10 @@ export class LibrusSubjectGradesCard extends LitElement {
                 ${g.category}${g.category && g.date ? " · " : ""}${formatDate(g.date)}
               </div>
               <div class="dlg-grade-large ${gradeTypeInfo(g.category).cssClass}">
-                ${g.grade}
+                ${g.correction_of?.grade
+                  ? html`<span class="dlg-from">${g.correction_of.grade}</span><span class="dlg-arrow" aria-hidden="true">→</span>`
+                  : nothing}
+                <span class="${g.corrected_by ? "grade-struck" : ""}">${g.grade}</span>
               </div>
               <div class="dlg-details">
                 ${g.teacher
@@ -117,7 +141,19 @@ export class LibrusSubjectGradesCard extends LitElement {
                       <span class="dlg-detail-text">${g.title}</span>
                     </div>`
                   : nothing}
-                ${g.description
+                ${g.correction_of
+                  ? html`<div class="dlg-detail-row">
+                      <span class="dlg-detail-label">Poprawa oceny</span>
+                      <span>${this._describeRef(g.correction_of)}</span>
+                    </div>`
+                  : nothing}
+                ${g.corrected_by
+                  ? html`<div class="dlg-detail-row">
+                      <span class="dlg-detail-label">Poprawiona oceną</span>
+                      <span>${this._describeRef(g.corrected_by)}</span>
+                    </div>`
+                  : nothing}
+                ${!g.correction_of && g.description
                   ? html`<div class="dlg-detail-row">
                       <span class="dlg-detail-label">Poprawa</span>
                       <span>${g.description}</span>
@@ -157,17 +193,10 @@ export class LibrusSubjectGradesCard extends LitElement {
         <div class="grades-line">
           ${grades.length === 0
             ? html`<span class="empty">Brak ocen</span>`
-            : grades.map(
-                (g, i) => html`
+            : collapseCorrections(grades).map(
+                (entry, i) => html`
                   ${i > 0 ? html`<span class="sep">,</span>` : nothing}
-                  <span
-                    class="grade-chip ${gradeTypeInfo(g.category).cssClass} ${g.is_recent ? "recent" : ""}"
-                    role="button"
-                    tabindex="0"
-                    title="${g.category}${g.date ? " · " + formatDate(g.date) : ""}"
-                    @click="${() => this._openDialog(g)}"
-                    @keydown="${(e: KeyboardEvent) => e.key === "Enter" && this._openDialog(g)}"
-                  >${g.grade}</span>
+                  ${this._renderEntry(entry)}
                 `
               )}
         </div>
@@ -238,6 +267,33 @@ export class LibrusSubjectGradesCard extends LitElement {
     .grade-chip.recent {
       box-shadow: 0 0 0 2px var(--primary-color);
     }
+    .grade-chip.superseded {
+      opacity: 0.55;
+      text-decoration: line-through;
+    }
+
+    .chain {
+      display: inline-flex;
+      align-items: center;
+      gap: 3px;
+      padding: 1px 6px 1px 3px;
+      border: 1px dashed var(--divider-color, #bbb);
+      border-radius: 14px;
+    }
+    .arrow {
+      color: var(--secondary-text-color);
+      font-size: 0.9em;
+      line-height: 1;
+      user-select: none;
+    }
+    .grade-from {
+      padding: 3px 4px;
+      font-size: 0.9em;
+      font-weight: 600;
+      color: var(--secondary-text-color);
+      text-decoration: line-through;
+    }
+    .grade-struck { text-decoration: line-through; }
 
     .type-test      { --chip-bg: var(--error-color, #f44336); }
     .type-quiz      { --chip-bg: #ff9800; }
@@ -273,6 +329,12 @@ export class LibrusSubjectGradesCard extends LitElement {
       background: var(--chip-bg, var(--secondary-text-color, #888));
       margin-bottom: 16px;
     }
+    .dlg-from {
+      text-decoration: line-through;
+      opacity: 0.7;
+      font-weight: 400;
+    }
+    .dlg-arrow { margin: 0 12px; font-weight: 400; }
     .dlg-details {
       display: flex;
       flex-direction: column;

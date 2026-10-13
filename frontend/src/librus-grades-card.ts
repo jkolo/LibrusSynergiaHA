@@ -1,24 +1,14 @@
 import { LitElement, html, css, nothing } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
-import type { HassGrade, HomeAssistant, LibrusGradesCardConfig } from "./types.js";
+import type { HassGrade, HassGradeRef, HomeAssistant, LibrusGradesCardConfig } from "./types.js";
 import { resolveGradeEntities } from "./grades-discovery.js";
-
-function parseDateForSort(dateStr: string): number {
-  if (/^\d{2}\.\d{2}\.\d{4}$/.test(dateStr)) {
-    const [d, m, y] = dateStr.split(".");
-    return new Date(`${y}-${m}-${d}`).getTime();
-  }
-  return new Date(dateStr).getTime();
-}
-
-function formatDate(dateStr: string): string {
-  if (/^\d{2}\.\d{2}\.\d{4}$/.test(dateStr)) return dateStr;
-  if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
-    const [y, m, d] = dateStr.split("-");
-    return `${d}.${m}.${y}`;
-  }
-  return dateStr;
-}
+import { formatDate, parseDateForSort } from "./grade-format.js";
+import {
+  correctionLabel,
+  correctionNote,
+  supersededLabel,
+  supersededNote,
+} from "./grade-corrections.js";
 
 function gradeTypeInfo(category: string): { label: string; cssClass: string } {
   const cat = category.toLowerCase();
@@ -83,14 +73,22 @@ export class LibrusGradesCard extends LitElement {
   }
 
   private _renderRow(grade: HassGrade) {
-    const { label, cssClass } = gradeTypeInfo(grade.category);
+    const correction = correctionNote(grade);
+    const superseded = supersededNote(grade);
+    const note = correction ?? superseded;
+    const shortNote = correctionLabel(grade) ?? supersededLabel(grade);
+    const { label, cssClass } = correction
+      ? { label: "POPRAWA", cssClass: "type-correction" }
+      : gradeTypeInfo(grade.category);
+    const replacedGrade = grade.correction_of?.grade;
     const tooltip = [
       grade.teacher,
       grade.weight != null ? `waga ${grade.weight}` : "",
+      note ?? "",
     ].filter(Boolean).join(" · ");
     return html`
       <div
-        class="grade-row ${grade.is_recent ? "recent" : ""}"
+        class="grade-row ${grade.is_recent ? "recent" : ""} ${superseded ? "superseded" : ""}"
         data-tooltip="${tooltip || nothing}"
         role="button"
         tabindex="0"
@@ -98,11 +96,27 @@ export class LibrusGradesCard extends LitElement {
         @keydown="${(e: KeyboardEvent) => e.key === "Enter" && this._openDialog(grade)}"
       >
         <span class="grade-badge ${cssClass}">${label}</span>
-        <span class="grade-subject">${grade.subject}</span>
-        <span class="grade-value">${grade.grade}</span>
+        <span class="grade-subject">
+          <span class="grade-subject-name">${grade.subject}</span>
+          ${shortNote ? html`<span class="grade-note">${shortNote}</span>` : nothing}
+        </span>
+        <span
+          class="grade-value"
+          aria-label="${replacedGrade ? `${replacedGrade}, poprawiona na ${grade.grade}` : grade.grade}"
+        >
+          ${replacedGrade
+            ? html`<span class="grade-from">${replacedGrade}</span><span class="grade-arrow" aria-hidden="true">→</span>`
+            : nothing}
+          <span class="${superseded ? "grade-struck" : ""}">${grade.grade}</span>
+        </span>
         <span class="grade-date">${formatDate(grade.date)}</span>
       </div>
     `;
+  }
+
+  private _describeRef(ref: HassGradeRef): string {
+    const grade = [ref.grade, ref.category ? `(${ref.category})` : ""].filter(Boolean).join(" ");
+    return [grade || "—", ref.date ? formatDate(ref.date) : ""].filter(Boolean).join(" · ");
   }
 
   private _renderDialog() {
@@ -115,13 +129,26 @@ export class LibrusGradesCard extends LitElement {
         ${g ? html`
           <div class="dlg-title">${g.subject}</div>
           <div class="dlg-category-row">${g.category}${g.category && g.date ? " · " : ""}${formatDate(g.date)}</div>
-          <div class="dlg-grade-large ${gradeTypeInfo(g.category).cssClass}">${g.grade}</div>
+          <div class="dlg-grade-large ${gradeTypeInfo(g.category).cssClass}">
+            ${g.correction_of?.grade
+              ? html`<span class="dlg-from">${g.correction_of.grade}</span><span class="dlg-arrow" aria-hidden="true">→</span>`
+              : nothing}
+            <span class="${g.corrected_by ? "grade-struck" : ""}">${g.grade}</span>
+          </div>
           <div class="dlg-details">
             ${g.teacher ? html`<div class="dlg-detail-row"><span class="dlg-detail-label">Nauczyciel</span><span>${g.teacher}</span></div>` : nothing}
             ${g.weight != null ? html`<div class="dlg-detail-row"><span class="dlg-detail-label">Waga</span><span>${g.weight}</span></div>` : nothing}
             <div class="dlg-detail-row"><span class="dlg-detail-label">Liczy do średniej</span><span>${g.counts ? "Tak" : "Nie"}</span></div>
             ${g.title ? html`<div class="dlg-detail-row dlg-detail-row--block"><span class="dlg-detail-label">Temat</span><span class="dlg-detail-text">${g.title}</span></div>` : nothing}
-            ${g.description ? html`<div class="dlg-detail-row"><span class="dlg-detail-label">Poprawa</span><span>${g.description}</span></div>` : nothing}
+            ${g.correction_of
+              ? html`<div class="dlg-detail-row"><span class="dlg-detail-label">Poprawa oceny</span><span>${this._describeRef(g.correction_of)}</span></div>`
+              : nothing}
+            ${g.corrected_by
+              ? html`<div class="dlg-detail-row"><span class="dlg-detail-label">Poprawiona oceną</span><span>${this._describeRef(g.corrected_by)}</span></div>`
+              : nothing}
+            ${!g.correction_of && g.description
+              ? html`<div class="dlg-detail-row"><span class="dlg-detail-label">Poprawa</span><span>${g.description}</span></div>`
+              : nothing}
             ${g.comment ? html`<div class="dlg-detail-row dlg-detail-row--block"><span class="dlg-detail-label">Komentarz</span><span class="dlg-detail-text">${g.comment}</span></div>` : nothing}
           </div>
         ` : nothing}
@@ -247,13 +274,24 @@ export class LibrusGradesCard extends LitElement {
     .type-homework  { --badge-bg: #4caf50; }
     .type-essay     { --badge-bg: #9c27b0; }
     .type-other     { --badge-bg: var(--secondary-text-color, #888); }
+    .type-correction { --badge-bg: #009688; }
 
     .grade-subject {
+      display: flex;
+      flex-direction: column;
+      min-width: 0;
       font-size: 0.9em;
       color: var(--primary-text-color);
+    }
+    .grade-subject-name,
+    .grade-note {
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
+    }
+    .grade-note {
+      font-size: 0.82em;
+      color: var(--secondary-text-color);
     }
     .grade-value {
       font-size: 1em;
@@ -261,7 +299,22 @@ export class LibrusGradesCard extends LitElement {
       color: var(--primary-text-color);
       min-width: 28px;
       text-align: right;
+      white-space: nowrap;
     }
+    .grade-from,
+    .grade-struck {
+      text-decoration: line-through;
+    }
+    .grade-from {
+      font-weight: 400;
+      color: var(--secondary-text-color);
+    }
+    .grade-arrow {
+      margin: 0 4px;
+      font-weight: 400;
+      color: var(--secondary-text-color);
+    }
+    .grade-row.superseded { opacity: 0.65; }
     .grade-date {
       font-size: 0.78em;
       color: var(--secondary-text-color);
@@ -299,6 +352,12 @@ export class LibrusGradesCard extends LitElement {
       background: var(--badge-bg, var(--secondary-text-color, #888));
       margin-bottom: 16px;
     }
+    .dlg-from {
+      text-decoration: line-through;
+      opacity: 0.7;
+      font-weight: 400;
+    }
+    .dlg-arrow { margin: 0 12px; font-weight: 400; }
     .dlg-details {
       display: flex;
       flex-direction: column;
