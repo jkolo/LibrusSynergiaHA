@@ -99,6 +99,7 @@ CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 _MESSAGES_CARD_PATH = "/librus_apix/librus-messages-card.js"
 _GRADES_CARD_PATH = "/librus_apix/librus-grades-card.js"
 _SUBJECT_GRADES_CARD_PATH = "/librus_apix/librus-subject-grades-card.js"
+_SCHEDULE_CARD_PATH = "/librus_apix/librus-schedule-card.js"
 
 # Odczyt manifestu przy załadowaniu modułu (poza event loop) — cache bust dla karty Lovelace.
 try:
@@ -133,6 +134,10 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     if subject_grades_js.exists():
         static_paths.append(StaticPathConfig(_SUBJECT_GRADES_CARD_PATH, str(subject_grades_js), cache_headers=False))
         hass.async_create_task(_async_ensure_lovelace_resource(hass, _card_url(_SUBJECT_GRADES_CARD_PATH)))
+    schedule_js = www_dir / "librus-schedule-card.js"
+    if schedule_js.exists():
+        static_paths.append(StaticPathConfig(_SCHEDULE_CARD_PATH, str(schedule_js), cache_headers=False))
+        hass.async_create_task(_async_ensure_lovelace_resource(hass, _card_url(_SCHEDULE_CARD_PATH)))
     if static_paths:
         await hass.http.async_register_static_paths(static_paths)
         _LOGGER.debug("Librus Lovelace cards registered: %s", [p.url_path for p in static_paths])
