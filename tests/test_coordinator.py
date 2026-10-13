@@ -51,6 +51,7 @@ def fake_client(mock_student_info):
     client.async_get_timetable_events = AsyncMock(return_value=[])
     client.async_get_attendance = AsyncMock(return_value=[])
     client.async_get_homework = AsyncMock(return_value=[])
+    client.async_get_notes = AsyncMock(return_value=[])
     client.async_get_announcements = AsyncMock(return_value=[])
     return client
 
@@ -183,6 +184,7 @@ async def test_repair_issue_lib_outdated_after_threshold(
     fake_client.async_get_attendance = AsyncMock(return_value=None)
     fake_client.async_get_homework = AsyncMock(return_value=None)
     fake_client.async_get_announcements = AsyncMock(return_value=None)
+    fake_client.async_get_notes = AsyncMock(return_value=None)
 
     issue_id = coordinator._issue_id(ISSUE_LIB_OUTDATED)
     registry = ir.async_get(hass)
@@ -222,6 +224,7 @@ async def test_repair_issue_lib_outdated_clears_on_recovery(
     fake_client.async_get_attendance = AsyncMock(return_value=None)
     fake_client.async_get_homework = AsyncMock(return_value=None)
     fake_client.async_get_announcements = AsyncMock(return_value=None)
+    fake_client.async_get_notes = AsyncMock(return_value=None)
     for _ in range(5):
         await coordinator.async_refresh()
         await hass.async_block_till_done()
@@ -332,8 +335,8 @@ async def test_pause_invoked_between_endpoints(hass: HomeAssistant, fake_client)
         await coordinator.async_refresh()
         await hass.async_block_till_done()
 
-    # 8 fetcherow → 7 pauz między nimi.
-    assert len(pause_seconds) == 7
+    # 9 fetcherow → 8 pauz między nimi.
+    assert len(pause_seconds) == 8
 
 
 async def test_schedule_next_refresh_uses_async_call_later(
@@ -618,3 +621,65 @@ async def test_upgrade_cache_without_homework_does_not_fire(
     await coordinator.async_refresh()
     await hass.async_block_till_done()
     assert coordinator.consume_pending_event("new_homework")["subject"] == "Polski"
+
+
+# ---------------------------------------------------------------------------
+# Uwagi (notes)
+# ---------------------------------------------------------------------------
+
+
+def _note(note_id: int = 1, kind: str = "negative") -> dict:
+    return {
+        "id": note_id, "date": "2026-10-01", "text": "Rozmowy na lekcji.",
+        "kind": kind, "category": "Zachowanie", "teacher": "Jan Nowak",
+    }
+
+
+async def test_notes_in_data_and_first_run_seeds_only(hass: HomeAssistant, fake_client):
+    fake_client.async_get_notes = AsyncMock(return_value=[_note()])
+    coordinator = LibrusDataUpdateCoordinator(hass, fake_client)
+    await coordinator.async_refresh()
+    await hass.async_block_till_done()
+
+    assert coordinator.data["notes"] == [_note()]
+    assert coordinator.consume_pending_event("new_note") is None
+
+
+async def test_new_note_enqueues_event(hass: HomeAssistant, fake_client):
+    fake_client.async_get_notes = AsyncMock(return_value=[_note()])
+    coordinator = LibrusDataUpdateCoordinator(hass, fake_client)
+    await coordinator.async_refresh()
+    await hass.async_block_till_done()
+
+    fake_client.async_get_notes = AsyncMock(return_value=[_note(2, "positive"), _note()])
+    await coordinator.async_refresh()
+    await hass.async_block_till_done()
+
+    assert coordinator.consume_pending_event("new_note") == _note(2, "positive")
+
+
+async def test_notes_none_keeps_cached(hass: HomeAssistant, fake_client):
+    fake_client.async_get_notes = AsyncMock(return_value=[_note()])
+    coordinator = LibrusDataUpdateCoordinator(hass, fake_client)
+    await coordinator.async_refresh()
+    await hass.async_block_till_done()
+
+    fake_client.async_get_notes = AsyncMock(return_value=None)
+    await coordinator.async_refresh()
+    await hass.async_block_till_done()
+
+    assert coordinator.data["notes"] == [_note()]
+
+
+async def test_upgrade_cache_without_notes_does_not_fire(hass: HomeAssistant, fake_client):
+    """Cache sprzed uwag nie ma klucza `notes` — pierwsza lista tylko seeduje."""
+    fake_client.async_get_notes = AsyncMock(return_value=[_note()])
+    coordinator = LibrusDataUpdateCoordinator(hass, fake_client)
+    coordinator.data = {"grades": [], "messages": [], "schedule": [], "homework": []}
+    coordinator._seed_seen_sets_from_data(coordinator.data)
+    coordinator._first_run = False
+
+    await coordinator.async_refresh()
+    await hass.async_block_till_done()
+
+    assert coordinator.consume_pending_event("new_note") is None

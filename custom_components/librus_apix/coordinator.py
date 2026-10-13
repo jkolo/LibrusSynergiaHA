@@ -94,6 +94,7 @@ EVENT_KEY_NEW_ANNOUNCEMENT = "new_announcement"
 EVENT_KEY_NEW_ABSENCE = "new_absence"
 EVENT_KEY_NEW_HOMEWORK = "new_homework"
 EVENT_KEY_NEW_SCHEDULE_EVENT = "new_schedule_event"
+EVENT_KEY_NEW_NOTE = "new_note"
 EVENT_KEYS = (
     EVENT_KEY_NEW_MESSAGE,
     EVENT_KEY_NEW_GRADE,
@@ -102,6 +103,7 @@ EVENT_KEYS = (
     EVENT_KEY_NEW_ABSENCE,
     EVENT_KEY_NEW_HOMEWORK,
     EVENT_KEY_NEW_SCHEDULE_EVENT,
+    EVENT_KEY_NEW_NOTE,
 )
 
 
@@ -245,7 +247,7 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.read_messages_store: ReadMessagesStore | None = None
         self._step_timestamps: dict[str, datetime | None] = {k: None for k in (
             "student_info", "grades", "messages", "schedule",
-            "timetable", "attendance", "announcements", "homework",
+            "timetable", "attendance", "announcements", "homework", "notes",
         )}
         self._last_full_refresh: datetime | None = None
         self._seen_message_hrefs: OrderedDict[str, None] = OrderedDict()
@@ -255,6 +257,7 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._seen_absence_keys: OrderedDict[tuple, None] = OrderedDict()
         self._seen_homework_keys: OrderedDict[tuple, None] = OrderedDict()
         self._seen_schedule_keys: OrderedDict[tuple, None] = OrderedDict()
+        self._seen_note_ids: OrderedDict[Any, None] = OrderedDict()
         self._first_run: bool = True
         # Tracks consecutive ticks where every endpoint returned None — used
         # to escalate to a repair issue suggesting a librus-apix upgrade
@@ -351,6 +354,8 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             _add_lru(self._seen_homework_keys, _homework_key(hw))
         for ev in data.get("schedule", []) or []:
             _add_lru(self._seen_schedule_keys, _schedule_key(ev))
+        for note in data.get("notes", []) or []:
+            _add_lru(self._seen_note_ids, note.get("id"))
 
     # ---------- Options helpers (PR 6) ----------
 
@@ -495,6 +500,7 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 "attendance": self.client.async_get_attendance,
                 "announcements": self.client.async_get_announcements,
                 "homework": self.client.async_get_homework,
+                "notes": self.client.async_get_notes,
             }
             humanize = self._opt_humanize()
             order = (
@@ -511,7 +517,7 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 if results[name] is not None:
                     self._step_timestamps[name] = dt_util.utcnow()
                 # Skip jitter on first_run: HA cancels setup after ~60s,
-                # and 8 fetchers × up to 15s pause would exceed that limit.
+                # and 9 fetchers × up to 15s pause would exceed that limit.
                 if humanize and i < len(order) - 1 and not self._first_run:
                     pause = jitter_pause_seconds(self._rng)
                     _LOGGER.debug(
@@ -539,6 +545,12 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 homework if homework is not None
                 else (self.data or {}).get("homework", [])
             )
+            # Uwagi: jak zadania — przy bledzie zostaje lista z cache.
+            notes = results["notes"]
+            notes_list = (
+                notes if notes is not None
+                else (self.data or {}).get("notes", [])
+            )
 
             # Detect "every endpoint failed" (None) — indicates a likely
             # parser breakage in librus-apix. Threshold guards against a
@@ -547,7 +559,7 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 v is None
                 for v in (
                     student_info, grades, messages, schedule_all, timetable,
-                    attendance, announcements, homework,
+                    attendance, announcements, homework, notes,
                 )
             )
             if all_none:
@@ -618,6 +630,7 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                         else prev.get("announcements", [])
                     ),
                     "homework": homework_list,
+                    "notes": notes_list,
                     "current_semester": current_semester,
                 }
 
@@ -680,6 +693,7 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 "attendance_by_subject": _attendance_by_subject(attendance_list),
                 "announcements": announcements_list,
                 "homework": homework_list,
+                "notes": notes_list,
                 "current_semester": current_semester,
             }
 
@@ -703,7 +717,7 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 self._enqueue_events(
                     annotated_messages, grades, exams_list,
                     announcements_list, attendance_list,
-                    homework_list, result["schedule"],
+                    homework_list, result["schedule"], notes_list,
                 )
 
             if self.read_messages_store is not None:
@@ -761,6 +775,7 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         attendance: list[dict],
         homework: list[dict],
         schedule: list[dict],
+        notes: list[dict] | None = None,
     ) -> None:
         """Buffer payloads for newly observed items so event entities emit them.
 
@@ -916,6 +931,25 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     "event_type": ev.get("event_type", "other"),
                     "is_exam": bool(ev.get("is_exam", False)),
                     "days_until": ev.get("days_until", 0),
+                }
+
+        # Cache sprzed uwag nie ma klucza "notes" — tylko seedujemy.
+        notes = notes or []
+        if "notes" not in (self.data or {}):
+            for note in notes:
+                _add_lru(self._seen_note_ids, note.get("id"))
+            notes = []
+
+        # Lista jest od najnowszej; od najstarszej, zeby w buforze zostala
+        # najnowsza nowa uwaga.
+        for note in reversed(notes):
+            note_id = note.get("id")
+            if note_id not in self._seen_note_ids:
+                _add_lru(self._seen_note_ids, note_id)
+                _LOGGER.debug("New note: %s %s", note.get("date"), note.get("kind"))
+                self._pending_events[EVENT_KEY_NEW_NOTE] = {
+                    k: note.get(k)
+                    for k in ("id", "date", "text", "kind", "category", "teacher")
                 }
 
     def _annotate_messages(self, messages: list[dict] | None) -> list[dict]:

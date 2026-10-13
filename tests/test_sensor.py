@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
 # These imports will fail until the corresponding helpers are implemented
@@ -11,6 +13,7 @@ from custom_components.librus_apix.sensor import (
     _attrs_announcements,
     _attrs_frequency,
     _attrs_homework,
+    _attrs_notes,
     _attrs_latest_absence,
     _attrs_latest_announcement,
     _attrs_latest_grade,
@@ -22,6 +25,7 @@ from custom_components.librus_apix.sensor import (
     _val_announcements_count,
     _val_frequency,
     _val_homework_count,
+    _val_notes_count,
     _val_latest_absence,
     _val_latest_announcement,
     _val_latest_grade,
@@ -356,6 +360,43 @@ class TestHomeworkSensor:
         assert item["due_date"] == "2026-10-02"
         assert "href" not in item
         assert "due_date_raw" not in item
+
+
+def _note(note_id: int, kind: str, text: str = "Rozmowy na lekcji.") -> dict:
+    return {
+        "id": note_id, "date": f"2026-10-{note_id:02d}", "text": text,
+        "kind": kind, "category": "Zachowanie", "teacher": "Jan Nowak",
+    }
+
+
+class TestNotesSensor:
+    def test_state_is_count(self):
+        assert _val_notes_count({"notes": [_note(2, "negative"), _note(1, "positive")]}) == 2
+        assert _val_notes_count({}) == 0
+
+    def test_attrs_counts_by_kind_and_latest(self):
+        data = {"notes": [
+            _note(3, "neutral"), _note(2, "negative"), _note(1, "positive"),
+        ]}
+        attrs = _attrs_notes(data)
+        assert attrs["count"] == 3
+        assert (attrs["positive"], attrs["negative"], attrs["neutral"]) == (1, 1, 1)
+        assert attrs["latest"]["id"] == 3
+        assert [n["id"] for n in attrs["notes"]] == [3, 2, 1]
+
+    def test_attrs_are_bounded_for_recorder(self):
+        data = {"notes": [_note(i % 28 + 1, "negative", "x" * 1000) for i in range(60)]}
+        attrs = _attrs_notes(data)
+        assert len(attrs["notes"]) == 20
+        assert attrs["notes_truncated"] is True
+        assert len(attrs["notes"][0]["text"]) == 300
+        assert len(json.dumps(attrs, ensure_ascii=False).encode()) < 16_000
+
+    def test_empty(self):
+        attrs = _attrs_notes({})
+        assert attrs["count"] == 0
+        assert attrs["latest"] is None
+        assert attrs["notes"] == []
 
 
 # ---------------------------------------------------------------------------

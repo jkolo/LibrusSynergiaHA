@@ -103,6 +103,9 @@
       },
       "homework": {
         "name": "Homework"
+      },
+      "notes": {
+        "name": "Notes"
       }
     },
     "calendar": {
@@ -143,6 +146,9 @@
       },
       "new_schedule_event": {
         "name": "New schedule entry"
+      },
+      "new_note": {
+        "name": "New note"
       }
     }
   },

@@ -25,6 +25,7 @@ Integracja tworzy następujące sensory:
 | `sensor.librus_wiadomosci` | Ostatnie 5 wiadomości z pełną treścią | liczba nieprzeczytanych |
 | `sensor.librus_terminarz` | Nadchodzące wpisy terminarza (sprawdziany, dni wolne, wycieczki…) z opisem i nauczycielem | liczba wpisów |
 | `sensor.librus_zadania_domowe` | Zadania domowe z terminem w najbliższych 30 dniach | liczba zadań |
+| `sensor.librus_uwagi` | Uwagi (pozytywne, negatywne, neutralne) z treścią, kategorią i nauczycielem; atrybuty `positive` / `negative` / `neutral`, `latest` | liczba uwag |
 | `sensor.librus_<przedmiot>` | Oceny z danego przedmiotu (np. `sensor.librus_matematyka`) | lista ocen: "4, 3+, 5" |
 | `sensor.librus_srednia_<przedmiot>` | **Średnia** z danego przedmiotu (np. `sensor.librus_srednia_matematyka`) | float (wykres 📈) |
 
@@ -310,6 +311,27 @@ automation:
             Ocena: {{ trigger.event.data.ocena }}
             Kategoria: {{ trigger.event.data.kategoria }}
             Nauczyciel: {{ trigger.event.data.nauczyciel }}
+```
+
+### ⚠️ Powiadomienie o nowej uwadze
+
+Encja zdarzenia `event.librus_<dziecko>_nowa_uwaga` zmienia stan przy każdej nowej uwadze; atrybuty: `date`, `text`, `kind` (`positive` / `negative` / `neutral`), `category`, `teacher`.
+
+```yaml
+automation:
+  - alias: "Librus - nowa uwaga"
+    trigger:
+      - platform: state
+        entity_id: event.librus_imie_nazwisko_nowa_uwaga
+    action:
+      - service: notify.mobile_app_NAZWA_TWOJEGO_TELEFONU
+        data:
+          title: >-
+            {{ {'positive': '👍', 'negative': '⚠️'}.get(trigger.to_state.attributes.kind, 'ℹ️') }}
+            Uwaga: {{ trigger.to_state.attributes.category }}
+          message: >-
+            {{ trigger.to_state.attributes.text }}
+            ({{ trigger.to_state.attributes.teacher }})
 ```
 
 > **Gdzie znaleźć nazwę telefonu?** HA → Settings → Devices & Services → Mobile App → nazwa urządzenia (np. `notify.mobile_app_samsung_galaxy_s24`)

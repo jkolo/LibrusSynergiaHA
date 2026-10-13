@@ -40,6 +40,7 @@ def fake_client_with_messages(mock_student_info):
     client.async_get_timetable_events = AsyncMock(return_value=[])
     client.async_get_attendance = AsyncMock(return_value=[])
     client.async_get_homework = AsyncMock(return_value=[])
+    client.async_get_notes = AsyncMock(return_value=[])
     client.async_get_announcements = AsyncMock(return_value=[])
     return client
 
@@ -126,7 +127,7 @@ async def test_event_entities_exist_after_setup(
     expected_keys = (
         "new_grade", "new_message", "new_exam",
         "new_announcement", "new_absence",
-        "new_homework", "new_schedule_event",
+        "new_homework", "new_schedule_event", "new_note",
     )
     registry = er.async_get(hass)
     event_entries = [
@@ -139,7 +140,7 @@ async def test_event_entities_exist_after_setup(
         assert expected_uid in unique_ids, (
             f"event entity z unique_id={expected_uid} powinno istniec po setup"
         )
-    assert len(event_entries) == 7
+    assert len(event_entries) == 8
 
 
 # ---------------------------------------------------------------------------
