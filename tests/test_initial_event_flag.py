@@ -39,6 +39,7 @@ def coord_client(mock_student_info):
     client.async_get_timetable_events = AsyncMock(return_value=[])
     client.async_get_attendance = AsyncMock(return_value=[])
     client.async_get_homework = AsyncMock(return_value=[])
+    client.async_get_notes = AsyncMock(return_value=[])
     client.async_get_announcements = AsyncMock(return_value=[])
     return client
 

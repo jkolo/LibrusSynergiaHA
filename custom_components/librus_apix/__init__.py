@@ -309,6 +309,42 @@ def _grade_numeric_value(grade: str) -> float | None:
     return value
 
 
+_GATEWAY_NOTES = f"{librus_urls.GATEWAY_API_URL}/2.0/Notes"
+_GATEWAY_NOTE_CATEGORIES = f"{librus_urls.GATEWAY_API_URL}/2.0/Notes/Categories"
+
+# Pole `Positive` w uwagach gateway API (wg forka procaktomasz/LibrusSynergiaHA,
+# sprawdzone na prawdziwych kontach).
+_NOTE_KINDS = {0: "negative", 1: "positive", 2: "neutral"}
+
+
+def _gateway_lookup(
+    client: Client, url: str, key: str, label: Callable[[dict], str]
+) -> dict[Any, str]:
+    """Slownik Id -> etykieta z listy gateway API; pusty przy bledzie."""
+    try:
+        return {item["Id"]: label(item) for item in client.get(url).json().get(key, [])}
+    except Exception:  # noqa: BLE001 — opcjonalne dane, uwagi i bez nich
+        return {}
+
+
+def _map_notes(
+    notes: list[dict], categories: dict[Any, str], teachers: dict[Any, str]
+) -> list[dict[str, Any]]:
+    """Surowe uwagi z gateway API -> lista dictow od najnowszej."""
+    mapped = [
+        {
+            "id": n.get("Id"),
+            "date": (n.get("Date") or "")[:10],
+            "text": (n.get("Text") or "").strip(),
+            "kind": _NOTE_KINDS.get(n.get("Positive"), "other"),
+            "category": categories.get((n.get("Category") or {}).get("Id"), ""),
+            "teacher": teachers.get((n.get("Teacher") or {}).get("Id"), ""),
+        }
+        for n in notes
+    ]
+    return sorted(mapped, key=lambda n: (n["date"], n["id"] or 0), reverse=True)
+
+
 def _token_still_valid(client: Client) -> bool:
     """True gdy token dziala — sonda na stronie informacji o uczniu."""
     try:
@@ -928,6 +964,43 @@ class LibrusApiClient:
             ]
 
         return await self._with_retry("announcements", _work)
+
+    async def async_get_notes(self) -> list[dict[str, Any]] | None:
+        """Pobierz uwagi ucznia z gateway API Librusa (`Notes`).
+
+        Pola: `id`, `date` (YYYY-MM-DD), `text`, `kind`
+        (positive/negative/neutral/other), `category`, `teacher`. Lista od
+        najnowszej. GET na JSON API niczego nie oznacza jako przeczytane
+        (w odroznieniu od otwierania wiadomosci).
+
+        Bledna odpowiedz `Notes` (np. szkola bez modulu uwag) daje None bez
+        wyjatku — wyjatek w _with_retry resetowalby logowanie co cykl.
+        """
+
+        def _work(client: Client) -> list[dict[str, Any]] | None:
+            client.refresh_oauth()  # cookie oauth_token wymagane przez gateway API
+            try:
+                payload = client.get(_GATEWAY_NOTES).json()
+            except ValueError:
+                _LOGGER.warning("Uwagi: odpowiedź gateway API to nie JSON")
+                return None
+            notes = payload.get("Notes") if isinstance(payload, dict) else None
+            if notes is None:
+                _LOGGER.warning("Uwagi: brak pola 'Notes' w odpowiedzi: %s", str(payload)[:200])
+                return None
+            if not notes:
+                return []
+            categories = _gateway_lookup(
+                client, _GATEWAY_NOTE_CATEGORIES, "Categories",
+                lambda c: c.get("CategoryName", ""),
+            )
+            teachers = _gateway_lookup(
+                client, librus_urls.GATEWAY_API_USERS, "Users",
+                lambda u: f"{u.get('FirstName', '')} {u.get('LastName', '')}".strip(),
+            )
+            return _map_notes(notes, categories, teachers)
+
+        return await self._with_retry("notes", _work)
 
 
     async def async_get_message_content(self, href: str) -> dict[str, str] | None:

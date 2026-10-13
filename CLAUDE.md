@@ -80,7 +80,7 @@ student_info, grades, grades_by_subject, messages,
 upcoming_exams (schedule filtrowany is_exam — dla next_exam/new_exam),
 schedule (pełny terminarz: event_type, is_exam, is_day_off, description, teacher, weekday, details),
 timetable, attendance, attendance_frequency, attendance_by_subject,
-announcements, homework (30 dni, due_date ISO), current_semester
+announcements, homework (30 dni, due_date ISO), notes (uwagi z gateway API, od najnowszej), current_semester
 ```
 
 Atrybuty sensorów muszą zmieścić się w **16 KB** (limit recordera) — listy wystawiaj w widoku kompaktowym, a dla dużych list przycinaj z flagą (wzór: `_attrs_schedule` → `events_truncated`). Pełne dane trzymaj w kalendarzu.
@@ -109,9 +109,13 @@ Librus ma okresowe przerwy (zwykle raz dziennie). Wzorzec:
 
 ### Eventy do automatyzacji
 
-Od v3.0 zdarzenia to **encje `event.*`** (`event.py`), nie `hass.bus`. Koordynator w `_enqueue_events` odkłada payload do `_pending_events[<klucz>]`, a encja zdarzenia zdejmuje go przez `consume_pending_event()`. Klucze: `new_message`, `new_grade`, `new_exam`, `new_announcement`, `new_absence`, `new_homework`, `new_schedule_event`. Wyjątek: `librus_apix_nowa_wiadomosc` nadal leci też na bus (flaga `initial`).
+Od v3.0 zdarzenia to **encje `event.*`** (`event.py`), nie `hass.bus`. Koordynator w `_enqueue_events` odkłada payload do `_pending_events[<klucz>]`, a encja zdarzenia zdejmuje go przez `consume_pending_event()`. Klucze: `new_message`, `new_grade`, `new_exam`, `new_announcement`, `new_absence`, `new_homework`, `new_schedule_event`, `new_note`. Wyjątek: `librus_apix_nowa_wiadomosc` nadal leci też na bus (flaga `initial`).
 
 **Pierwsze pobranie tylko zapamiętuje stan** w zbiorach `_seen_*` (LRU, `_seed_seen_sets_from_data`, flaga `_first_run`). Bez tego po (re)starcie wystrzeliłyby duplikaty dla wszystkich istniejących elementów. Nowa domena zdarzeń = nowy `_seen_*` + seed + pętla w `_enqueue_events`.
+
+### Uwagi
+
+`async_get_notes` czyta JSON z gateway API (`/gateway/api/2.0/Notes`, `Notes/Categories`, `Users`) po `client.refresh_oauth()` — jak `librus-apix` przy frekwencji. Zła odpowiedź `Notes` zwraca `None` **bez wyjątku**: wyjątek w `_with_retry` robi `_reset_auth()`, więc szkoła bez modułu uwag logowałaby się od nowa co cykl. `Positive`: 0 → `negative`, 1 → `positive`, 2 → `neutral` (wg forka procaktomasz, sprawdzone na prawdziwych kontach).
 
 ### Zadania domowe
 

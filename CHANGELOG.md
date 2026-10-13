@@ -18,6 +18,7 @@
 - **Karta `librus-schedule-card` — sprawdziany i lektury.** Dwie sekcje: sprawdziany/kartkówki z „dziś / jutro / za N dni” (kolor wg pilności) i opisem, oraz lektury z terminem. Źródło: `sensor.librus_<dziecko>_terminarz`.
 - **Lektury w terminarzu: `event_type: reading`.** Librus zapisuje je jako „Inne.” z opisem „Lektury - …”; klasyfikator sprawdza słowo „lektur” w tytule i opisie (po sprawdzianach, więc „Sprawdzian z lektury” zostaje sprawdzianem). Kalendarz „Terminarz” oznacza je `📖 [LEKTURA]`.
 - **Średnia ważona tam, gdzie szkoła jej używa.** Sensory średnich uwzględniają wagę z dymka oceny i pomijają oceny z „Licz do średniej: nie” (lub wagą 0). Gdy Librus nie podaje tych linii (szkoły bez średniej ważonej), wynik to zwykła średnia jak dotąd. Oceny opisowe z cyfrą mają teraz `counts`/`weight` równe `null` zamiast `false`/`0`, więc nadal liczą się do średniej.
+- **Uwagi.** Sensor `sensor.librus_<dziecko>_uwagi` (stan: liczba uwag; atrybuty `notes` — 20 najnowszych z treścią, kategorią, nauczycielem i rodzajem `positive`/`negative`/`neutral` — oraz liczniki i `latest`) i encja zdarzenia `new_note` dla nowej uwagi. Dane z JSON API Librusa (to samo, którego używa `librus-apix` przy frekwencji); sposób odczytu wzorowany na forku [procaktomasz/LibrusSynergiaHA](https://github.com/procaktomasz/LibrusSynergiaHA) ([LukMaverick/LibrusSynergiaHA#13](https://github.com/LukMaverick/LibrusSynergiaHA/issues/13)).
 
 ### Naprawiono
 

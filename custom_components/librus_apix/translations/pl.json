@@ -103,6 +103,9 @@
       },
       "homework": {
         "name": "Zadania domowe"
+      },
+      "notes": {
+        "name": "Uwagi"
       }
     },
     "calendar": {
@@ -143,6 +146,9 @@
       },
       "new_schedule_event": {
         "name": "Nowy wpis w terminarzu"
+      },
+      "new_note": {
+        "name": "Nowa uwaga"
       }
     }
   },

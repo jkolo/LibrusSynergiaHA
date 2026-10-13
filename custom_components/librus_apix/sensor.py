@@ -227,6 +227,39 @@ def _attrs_schedule(data: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+# Uwagi: 20 najnowszych, tresc przycinana — limit 16 KB recordera.
+_NOTES_ATTR_MAX = 20
+_NOTE_TEXT_MAX = 300
+
+
+def _val_notes_count(data: dict[str, Any]) -> StateType:
+    """Number of notes (uwagi) in the current school year."""
+    return len(data.get("notes") or [])
+
+
+def _compact_note(n: dict[str, Any]) -> dict[str, Any]:
+    view = dict(n)
+    text = view.get("text") or ""
+    if len(text) > _NOTE_TEXT_MAX:
+        view["text"] = text[: _NOTE_TEXT_MAX - 1] + "…"
+    return view
+
+
+def _attrs_notes(data: dict[str, Any]) -> dict[str, Any]:
+    notes = data.get("notes") or []  # od najnowszej
+    kinds = [n.get("kind") for n in notes]
+    shown = [_compact_note(n) for n in notes[:_NOTES_ATTR_MAX]]
+    return {
+        "notes": shown,
+        "notes_truncated": len(shown) < len(notes),
+        "count": len(notes),
+        "positive": kinds.count("positive"),
+        "negative": kinds.count("negative"),
+        "neutral": kinds.count("neutral"),
+        "latest": shown[0] if shown else None,
+    }
+
+
 # Pola zadania domowego wystawiane w atrybutach (bez href/due_date_raw).
 _HOMEWORK_ATTR_FIELDS = (
     "subject", "category", "teacher", "lesson", "task_date", "due_date",
@@ -587,6 +620,14 @@ SENSORS: tuple[LibrusSensorEntityDescription, ...] = (
         state_class=SensorStateClass.MEASUREMENT,
         value_fn=_val_homework_count,
         attrs_fn=_attrs_homework,
+    ),
+    LibrusSensorEntityDescription(
+        key="uwagi",
+        translation_key="notes",
+        icon="mdi:alert-box-outline",
+        state_class=SensorStateClass.MEASUREMENT,
+        value_fn=_val_notes_count,
+        attrs_fn=_attrs_notes,
     ),
     # ---- v3.0 NEW: latest_/next_ sensors ----
     LibrusSensorEntityDescription(
