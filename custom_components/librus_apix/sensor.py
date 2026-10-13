@@ -36,15 +36,25 @@ PARALLEL_UPDATES = 0  # All entities read from coordinator, no per-entity I/O.
 
 
 def _grade_average(grades: list[dict]) -> float | None:
-    """Compute the numeric average of Polish-style grades (e.g. '4+', '5-').
+    """Compute the (weighted) average of Polish-style grades (e.g. '4+', '5-').
 
     Plus modifier adds 0.5; minus subtracts 0.25. Invalid entries are skipped,
     and so are grades that were replaced by a correction (`corrected_by`) —
     the correction counts instead.
+
+    Weights apply only where Librus states them: `counts is False` or
+    `weight == 0` leaves a grade out, a missing weight (None) counts as 1.
+    Schools without weighted averages give None everywhere — plain mean.
     """
-    values: list[float] = []
+    total = 0.0
+    weights = 0
     for g in grades:
-        if g.get("corrected_by"):
+        if g.get("corrected_by") or g.get("counts") is False:
+            continue
+        weight = g.get("weight")
+        if weight is None:
+            weight = 1
+        if weight <= 0:
             continue
         grade_str = g.get("grade", "")
         try:
@@ -54,10 +64,11 @@ def _grade_average(grades: list[dict]) -> float | None:
                     base += 0.5
                 elif "-" in grade_str:
                     base -= 0.25
-            values.append(base)
         except (ValueError, IndexError):
             continue
-    return round(sum(values) / len(values), 2) if values else None
+        total += base * weight
+        weights += weight
+    return round(total / weights, 2) if weights else None
 
 
 # ---------------------------------------------------------------------------

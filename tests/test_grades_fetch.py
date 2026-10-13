@@ -14,7 +14,7 @@ from collections import defaultdict
 from unittest.mock import MagicMock, patch
 
 import pytest
-from librus_apix.grades import Grade
+from librus_apix.grades import Grade, GradeDescriptive
 
 from custom_components.librus_apix import LibrusApiClient, _current_semester
 
@@ -79,3 +79,24 @@ async def test_explicit_tooltip_lines_are_kept(hass, client):
 async def test_non_numeric_grade_has_no_value(hass, client):
     result = await _fetch(client, [_grade("np", "", counts=False, weight=0)])
     assert result[0]["value"] is None
+
+
+async def test_descriptive_digit_grade_has_unknown_counts_and_weight(hass, client):
+    """Ocena opisowa z cyfrą: Librus nie podaje wagi — None, nie False/0
+    (False wyrzucałoby ją ze średniej)."""
+    desc = [defaultdict(list), defaultdict(list)]
+    desc[_current_semester() - 1]["edukacja polonistyczna"] = [
+        GradeDescriptive(
+            "edukacja polonistyczna", "5", "2026-09-28", "", "Nauczyciel: Jan Kowalski",
+            _current_semester(), "Jan Kowalski",
+        )
+    ]
+    with patch(
+        "custom_components.librus_apix.get_grades",
+        return_value=([defaultdict(list), defaultdict(list)], {}, desc),
+    ):
+        result = await client.async_get_grades()
+
+    g = next(r for r in result if r["type"] == "descriptive")
+    assert g["counts"] is None
+    assert g["weight"] is None

@@ -57,6 +57,41 @@ class TestGradeAverage:
         assert _grade_average([{"grade": "1", "corrected_by": None}, {"grade": "5"}]) == 3.0
 
 
+    # --- Średnia ważona: tylko gdy Librus podaje wagę / "Licz do średniej" ---
+
+    def test_unknown_counts_and_weight_give_plain_mean(self):
+        # Szkoły bez średniej ważonej: counts/weight == None → zwykła średnia.
+        assert _grade_average([
+            {"grade": "5", "counts": None, "weight": None},
+            {"grade": "2", "counts": None, "weight": None},
+        ]) == 3.5
+
+    def test_grade_not_counting_is_left_out(self):
+        assert _grade_average([
+            {"grade": "1", "counts": False, "weight": 2},
+            {"grade": "5", "counts": True, "weight": 2},
+        ]) == 5.0
+
+    def test_weights_are_applied(self):
+        # (5*3 + 2*1) / 4 = 4.25
+        assert _grade_average([
+            {"grade": "5", "counts": True, "weight": 3},
+            {"grade": "2", "counts": True, "weight": 1},
+        ]) == 4.25
+
+    def test_missing_weight_counts_as_one(self):
+        # (5*3 + 3*1) / 4 = 4.5
+        assert _grade_average([
+            {"grade": "5", "weight": 3},
+            {"grade": "3", "weight": None},
+        ]) == 4.5
+
+    def test_zero_weight_is_left_out(self):
+        assert _grade_average([
+            {"grade": "1", "weight": 0},
+            {"grade": "5", "weight": 2},
+        ]) == 5.0
+
 class TestIsRecent:
     """_is_recent — date freshness within last 24h window."""
 

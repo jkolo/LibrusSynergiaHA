@@ -101,7 +101,7 @@ Librus ma okresowe przerwy (zwykle raz dziennie). Wzorzec:
 
 ### Parsowanie ocen do średniej
 
-`_srednia_ocen()` w `sensor.py`: bazowa cyfra + `+` daje `+0.5`, `-` daje `-0.25`. Sensory średnich (`LibrusSredniaOcenSensor`, `LibrusSredniaPrzedmiotuSensor`) mają `state_class = MEASUREMENT` — HA automatycznie rysuje wykres historyczny.
+`_grade_average()` w `sensor.py`: bazowa cyfra + `+` daje `+0.5`, `-` daje `-0.25`. Średnia ważona tylko tam, gdzie Librus podaje dane: `counts is False` lub `weight == 0` → pomijana, `weight is None` → waga 1, oceny z `corrected_by` pomijane. Brak linii „Licz do średniej”/„Waga” w dymku = `None` (nie `False`/`0` jak w `librus-apix`) — dla szkół bez wag wychodzi zwykła średnia. Sensory średnich (`LibrusSredniaOcenSensor`, `LibrusSredniaPrzedmiotuSensor`) mają `state_class = MEASUREMENT` — HA automatycznie rysuje wykres historyczny.
 
 ### Sensory tworzone dynamicznie
 
