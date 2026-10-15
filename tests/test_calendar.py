@@ -20,6 +20,7 @@ from custom_components.librus_apix.calendar import (
     _attendance_to_calendar_event,
     _grade_to_calendar_event,
     _homework_to_calendar_event,
+    _lesson_to_calendar_event,
     _schedule_event_to_calendar_event,
 )
 
@@ -434,3 +435,51 @@ def test_schedule_reading_has_lektura_tag():
         "description": "Lektury - Katarynka, Janko Muzykant.",
     })
     assert ev.summary.startswith("📖 [LEKTURA] język polski")
+
+
+
+# ---------------------------------------------------------------------------
+# _lesson_to_calendar_event — zastępstwa, odwołania, dni wolne (info z Librusa)
+# ---------------------------------------------------------------------------
+
+
+def _lesson(info: dict) -> dict:
+    return {
+        "subject": "matematyka", "teacher_and_classroom": "Jan Kowalski s31",
+        "date": "2026-10-13", "time_from": "08:00", "time_to": "08:45",
+        "weekday": "wtorek", "lesson_number": 1, "info": info,
+    }
+
+
+def test_lesson_substitution_is_readable_and_tagged():
+    ev = _lesson_to_calendar_event(_lesson({"zastępstwo": {
+        "teacher_swap": "wakat matematyka -> Głuchowska Monika",
+        "subject_swap": "",
+        "classroom_swap": "s31 -> [brak]",
+        "date_added": "2026-10-12 14:03:11",
+    }}))
+    assert ev.summary == "🔄 [ZASTEPSTWO] 1. matematyka"
+    assert "{" not in ev.description and "_swap" not in ev.description
+    assert "Zastępstwo" in ev.description
+    assert "Nauczyciel: wakat matematyka → Głuchowska Monika" in ev.description
+    assert "Sala: s31 → brak" in ev.description
+    assert "Przedmiot" not in ev.description  # pusty — pomijany
+    assert "Dodano: 2026-10-12 14:03:11" in ev.description
+
+
+def test_lesson_cancelled_is_tagged():
+    ev = _lesson_to_calendar_event(_lesson({"odwołane": ""}))
+    assert ev.summary == "❌ [ODWOLANE] 1. matematyka"
+    assert "odwołane" in ev.description
+
+
+def test_lesson_on_school_day_off_is_tagged():
+    ev = _lesson_to_calendar_event(_lesson({"dzień wolny szkoły: Dzień Edukacji Narodowej": ""}))
+    assert ev.summary == "🏖️ [WOLNE] 1. matematyka"
+    assert "dzień wolny szkoły: Dzień Edukacji Narodowej" in ev.description
+
+
+def test_regular_lesson_has_no_tag():
+    ev = _lesson_to_calendar_event(_lesson({}))
+    assert ev.summary == "1. matematyka"
+    assert ev.description == "Jan Kowalski s31"
