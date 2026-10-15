@@ -151,76 +151,6 @@ def _add_lru(items: OrderedDict[Any, None], key: Any) -> None:
             items.popitem(last=False)
 
 
-def _attendance_frequency(
-    attendance: list[dict] | None, current_semester: int
-) -> dict[str, float]:
-    """Compute (sem1, sem2, total, current) attendance percentages.
-
-    Frequency = present_count / (present_count + counted_absences) × 100.
-    Counted absences: nieobecności (`nb`, `u`) i spóźnienia (`sp`). Wycieczki,
-    konkursy, szkolenia, zwolnienia liczymy jako obecność (dziecko jest pod
-    opieką szkoły).
-    """
-    if not attendance:
-        return {"semester_1": 0.0, "semester_2": 0.0, "total": 0.0, "current": 0.0}
-
-    counts = {1: {"present": 0, "missed": 0}, 2: {"present": 0, "missed": 0}}
-    for entry in attendance:
-        sem = entry.get("semester")
-        if sem not in counts:
-            continue
-        if entry.get("is_present") or entry.get("excursion"):
-            counts[sem]["present"] += 1
-        elif entry.get("is_absence") or entry.get("is_late"):
-            counts[sem]["missed"] += 1
-
-    def _pct(c: dict[str, int]) -> float:
-        total = c["present"] + c["missed"]
-        return round(c["present"] / total * 100.0, 2) if total else 0.0
-
-    sem1 = _pct(counts[1])
-    sem2 = _pct(counts[2])
-    total_present = counts[1]["present"] + counts[2]["present"]
-    total_missed = counts[1]["missed"] + counts[2]["missed"]
-    total = (
-        round(total_present / (total_present + total_missed) * 100.0, 2)
-        if (total_present + total_missed)
-        else 0.0
-    )
-    current = sem1 if current_semester == 1 else sem2
-    return {
-        "semester_1": sem1,
-        "semester_2": sem2,
-        "total": total,
-        "current": current,
-    }
-
-
-def _attendance_by_subject(
-    attendance: list[dict] | None,
-) -> dict[str, dict[str, int | float]]:
-    """For each subject return present/missed counts and frequency %."""
-    if not attendance:
-        return {}
-    by_subject: dict[str, dict[str, int]] = {}
-    for entry in attendance:
-        subject = entry.get("subject") or "(unknown)"
-        bucket = by_subject.setdefault(subject, {"present": 0, "missed": 0})
-        if entry.get("is_present") or entry.get("excursion"):
-            bucket["present"] += 1
-        elif entry.get("is_absence") or entry.get("is_late"):
-            bucket["missed"] += 1
-    out: dict[str, dict[str, int | float]] = {}
-    for subject, c in by_subject.items():
-        total = c["present"] + c["missed"]
-        out[subject] = {
-            "present": c["present"],
-            "missed": c["missed"],
-            "frequency": round(c["present"] / total * 100.0, 2) if total else 0.0,
-        }
-    return out
-
-
 class LibrusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     """Coordinator fetching student data from Librus."""
 
@@ -248,6 +178,7 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._step_timestamps: dict[str, datetime | None] = {k: None for k in (
             "student_info", "grades", "messages", "schedule",
             "timetable", "attendance", "announcements", "homework", "notes",
+            "attendance_stats",
         )}
         self._last_full_refresh: datetime | None = None
         self._seen_message_hrefs: OrderedDict[str, None] = OrderedDict()
@@ -504,6 +435,7 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 "announcements": self.client.async_get_announcements,
                 "homework": self.client.async_get_homework,
                 "notes": self.client.async_get_notes,
+                "attendance_stats": self.client.async_get_attendance_stats,
             }
             humanize = self._opt_humanize()
             order = (
@@ -520,7 +452,7 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 if results[name] is not None:
                     self._step_timestamps[name] = dt_util.utcnow()
                 # Skip jitter on first_run: HA cancels setup after ~60s,
-                # and 9 fetchers × up to 15s pause would exceed that limit.
+                # and 10 fetchers × up to 15s pause would exceed that limit.
                 if humanize and i < len(order) - 1 and not self._first_run:
                     pause = jitter_pause_seconds(self._rng)
                     _LOGGER.debug(
@@ -548,6 +480,17 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 homework if homework is not None
                 else (self.data or {}).get("homework", [])
             )
+            # Frekwencja z gateway API — przy bledzie zostaja wartosci z cache.
+            stats = results["attendance_stats"]
+            prev_data = self.data or {}
+            attendance_frequency = (
+                stats["overall"] if stats is not None
+                else prev_data.get("attendance_frequency", {})
+            )
+            attendance_by_subject = (
+                stats["by_subject"] if stats is not None
+                else prev_data.get("attendance_by_subject", {})
+            )
             # Uwagi: jak zadania — przy bledzie zostaje lista z cache.
             notes = results["notes"]
             notes_list = (
@@ -562,7 +505,7 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 v is None
                 for v in (
                     student_info, grades, messages, schedule_all, timetable,
-                    attendance, announcements, homework, notes,
+                    attendance, announcements, homework, notes, stats,
                 )
             )
             if all_none:
@@ -616,17 +559,8 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                         if attendance is not None
                         else prev.get("attendance", [])
                     ),
-                    "attendance_frequency": _attendance_frequency(
-                        attendance
-                        if attendance is not None
-                        else prev.get("attendance", []),
-                        current_semester,
-                    ),
-                    "attendance_by_subject": _attendance_by_subject(
-                        attendance
-                        if attendance is not None
-                        else prev.get("attendance", [])
-                    ),
+                    "attendance_frequency": attendance_frequency,
+                    "attendance_by_subject": attendance_by_subject,
                     "announcements": (
                         announcements
                         if announcements is not None
@@ -690,10 +624,8 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 "schedule": schedule_all if schedule_all is not None else [],
                 "timetable": timetable if timetable is not None else [],
                 "attendance": attendance_list,
-                "attendance_frequency": _attendance_frequency(
-                    attendance_list, current_semester
-                ),
-                "attendance_by_subject": _attendance_by_subject(attendance_list),
+                "attendance_frequency": attendance_frequency,
+                "attendance_by_subject": attendance_by_subject,
                 "announcements": announcements_list,
                 "homework": homework_list,
                 "notes": notes_list,
