@@ -483,3 +483,25 @@ def test_regular_lesson_has_no_tag():
     ev = _lesson_to_calendar_event(_lesson({}))
     assert ev.summary == "1. matematyka"
     assert ev.description == "Jan Kowalski s31"
+
+
+
+def test_schedule_description_has_no_technical_lines():
+    ev = _schedule_event_to_calendar_event({
+        "date": "2026-10-23", "title": "Prace klasowe sprawdziany.", "subject": "historia",
+        "event_type": "exam", "description": "Odkrycia geograficzne",
+        "teacher": "Golenia Rafał", "day_label": "23", "hour": "unknown",
+        "lesson_number": "unknown",
+    })
+    assert "unknown" not in ev.description
+    assert "event_type" not in ev.description
+    assert "Dzień:" not in ev.description
+    assert ev.description == "Opis: Odkrycia geograficzne\nNauczyciel: Golenia Rafał"
+
+
+def test_schedule_description_keeps_real_lesson_number():
+    ev = _schedule_event_to_calendar_event({
+        "date": "2026-10-23", "title": "Sprawdzian", "subject": "historia",
+        "event_type": "exam", "lesson_number": 7, "hour": "",
+    })
+    assert "Lekcja nr: 7" in ev.description

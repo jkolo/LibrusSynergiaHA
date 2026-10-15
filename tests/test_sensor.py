@@ -322,6 +322,25 @@ class TestScheduleSensor:
         assert attrs["events_truncated"] is True
         assert 0 < len(attrs["events"]) < 60
 
+    def test_exams_and_readings_survive_truncation(self):
+        """Produkcja: ~20 dziennych wpisów „wakat matematyka” przed
+        sprawdzianem — przycinanie od końca wypchnęłoby go z listy."""
+        filler = [
+            _sched(date=f"2026-10-{d:02d}", event_type="teacher_absence",
+                   is_exam=False, description="x" * 140, days_until=d)
+            for d in range(1, 29)
+        ] * 3
+        exam = _sched(date="2026-11-20", days_until=40, description="Sprawdzian")
+        reading = _sched(date="2026-11-25", event_type="reading", is_exam=False,
+                         days_until=45, description="Lektury - Katarynka")
+        attrs = _attrs_schedule({"schedule": filler + [exam, reading]})
+
+        types = [e["event_type"] for e in attrs["events"]]
+        assert "exam" in types and "reading" in types
+        assert attrs["events_truncated"] is True
+        dates = [e["date"] for e in attrs["events"]]
+        assert dates == sorted(dates)
+
     def test_long_description_is_shortened(self):
         attrs = _attrs_schedule({"schedule": [_sched(description="y" * 500)]})
         desc = attrs["events"][0]["description"]

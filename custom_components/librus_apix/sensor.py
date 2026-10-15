@@ -206,15 +206,26 @@ def _attrs_schedule(data: dict[str, Any]) -> dict[str, Any]:
     for e in events:
         t = e.get("event_type", "other")
         by_type[t] = by_type.get(t, 0) + 1
-    shown: list[dict[str, Any]] = []
+    # Budzet najpierw dla sprawdzianow i lektur, potem reszta (np. dziesiatki
+    # wpisow "wakat" nie moga wypchnac sprawdzianu z listy); wynik po dacie.
+    def _important(e: dict[str, Any]) -> bool:
+        return bool(e.get("is_exam")) or e.get("event_type") == "reading"
+
+    indexed = list(enumerate(events))
+    picked: list[tuple[int, dict[str, Any]]] = []
     used = 0
-    for e in events:
-        view = _compact_schedule_event(e)
-        size = len(json.dumps(view, ensure_ascii=False).encode())
-        if used + size > _SCHEDULE_EVENTS_BUDGET:
-            break
-        shown.append(view)
-        used += size
+    for group in (
+        [(i, e) for i, e in indexed if _important(e)],
+        [(i, e) for i, e in indexed if not _important(e)],
+    ):
+        for i, e in group:
+            view = _compact_schedule_event(e)
+            size = len(json.dumps(view, ensure_ascii=False).encode())
+            if used + size > _SCHEDULE_EVENTS_BUDGET:
+                break
+            picked.append((i, view))
+            used += size
+    shown = [view for _, view in sorted(picked, key=lambda p: (p[1].get("date") or "", p[0]))]
     return {
         "events": shown,
         "events_truncated": len(shown) < len(events),

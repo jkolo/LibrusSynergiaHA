@@ -129,13 +129,13 @@ def _schedule_event_to_calendar_event(event_dict: dict) -> CalendarEvent | None:
         desc_parts.append(f"Nauczyciel: {event_dict['teacher']}")
     if category:
         desc_parts.append(f"Kategoria: {category}")
-    if event_dict.get("day_label"):
-        desc_parts.append(f"Dzień: {event_dict['day_label']}")
-    if event_dict.get("hour"):
-        desc_parts.append(f"Godzina: {event_dict['hour']}")
-    if event_dict.get("lesson_number") is not None:
-        desc_parts.append(f"Lekcja nr: {event_dict['lesson_number']}")
-    desc_parts.append(f"event_type: {event_type}")
+    # librus-apix wstawia literal "unknown"; dzien widac w dacie, a typ w tagu.
+    hour = event_dict.get("hour")
+    if hour and hour != "unknown":
+        desc_parts.append(f"Godzina: {hour}")
+    lesson_no = event_dict.get("lesson_number")
+    if lesson_no not in (None, "", "unknown"):
+        desc_parts.append(f"Lekcja nr: {lesson_no}")
     description = "\n".join(desc_parts)
 
     start_time, end_time = _parse_hour_range(event_dict.get("hour", ""))
