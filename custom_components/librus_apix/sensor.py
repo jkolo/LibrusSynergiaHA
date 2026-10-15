@@ -383,10 +383,8 @@ def _attrs_next_exam(data: dict[str, Any]) -> dict[str, Any]:
 
 
 def _val_frequency(data: dict[str, Any]) -> StateType:
-    freq = data.get("attendance_frequency") or {}
-    if not freq:
-        return 0.0
-    return freq.get("current", 0.0)
+    # None (brak danych), nigdy 0.0 — wczesniej 0.0 udawalo prawdziwa wartosc.
+    return (data.get("attendance_frequency") or {}).get("current")
 
 
 def _attrs_frequency(data: dict[str, Any]) -> dict[str, Any]:
@@ -394,9 +392,9 @@ def _attrs_frequency(data: dict[str, Any]) -> dict[str, Any]:
     if not freq:
         return {}
     return {
-        "semester_1": freq.get("semester_1", 0.0),
-        "semester_2": freq.get("semester_2", 0.0),
-        "total": freq.get("total", 0.0),
+        "semester_1": freq.get("semester_1"),
+        "semester_2": freq.get("semester_2"),
+        "total": freq.get("total"),
         "by_subject": data.get("attendance_by_subject", {}),
     }
 

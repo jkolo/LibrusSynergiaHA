@@ -113,6 +113,10 @@ Od v3.0 zdarzenia to **encje `event.*`** (`event.py`), nie `hass.bus`. Koordynat
 
 **Pierwsze pobranie tylko zapamiętuje stan** w zbiorach `_seen_*` (LRU, `_seed_seen_sets_from_data`, flaga `_first_run`). Bez tego po (re)starcie wystrzeliłyby duplikaty dla wszystkich istniejących elementów. Nowa domena zdarzeń = nowy `_seen_*` + seed + pętla w `_enqueue_events`.
 
+### Frekwencja
+
+Lista HTML (`get_attendance`) ma tylko nieobecności/spóźnienia/zwolnienia — **bez obecności**, więc nie licz z niej procentów (dawało 0,0). `attendance_frequency` i `attendance_by_subject` liczy `async_get_attendance_stats` z gateway API: `Attendances` (wszystkie wpisy, typ 100 = `ob`) + hurtowe `Lessons`/`Subjects` do mapowania lekcja→przedmiot (pojedyncze zapytania tylko awaryjnie, limit 30). Definicja jak w `librus-apix`: obecny = `ob`/`sp`/`wy`, mianownik = wszystkie wpisy — ta sama per przedmiot i ogółem. Lista HTML zostaje dla szczegółów nieobecności (daty, tematy, nauczyciele).
+
 ### Uwagi
 
 `async_get_notes` czyta JSON z gateway API (`/gateway/api/2.0/Notes`, `Notes/Categories`, `Users`) po `client.refresh_oauth()` — jak `librus-apix` przy frekwencji. Zła odpowiedź `Notes` zwraca `None` **bez wyjątku**: wyjątek w `_with_retry` robi `_reset_auth()`, więc szkoła bez modułu uwag logowałaby się od nowa co cykl. `Positive`: 0 → `negative`, 1 → `positive`, 2 → `neutral` (wg forka procaktomasz, sprawdzone na prawdziwych kontach).

@@ -359,6 +359,64 @@ def _map_notes(
     return sorted(mapped, key=lambda n: (n["date"], n["id"] or 0), reverse=True)
 
 
+_GATEWAY_LESSONS = f"{librus_urls.GATEWAY_API_URL}/2.0/Lessons"
+_GATEWAY_SUBJECTS = f"{librus_urls.GATEWAY_API_URL}/2.0/Subjects"
+
+# Typy frekwencji w gateway API (jak librus_apix.attendance).
+_ATTENDANCE_TYPES = {
+    "1": "nb", "2": "sp", "3": "u", "4": "zw",
+    "100": "ob", "1266": "wy", "2022": "k", "2829": "sz",
+}
+# Definicja jak w librus-apix (frekwencja ogolna): obecny = ob/sp/wy,
+# mianownik = wszystkie wpisy. Ta sama na poziomie przedmiotu, wiec suma
+# per przedmiot = calosc. Jesli % odbiega od Librusa, pokretlem jest
+# traktowanie k/sz/zw.
+_ATTENDED = frozenset({"ob", "sp", "wy"})
+_UNKNOWN_SUBJECT = "(nieznany przedmiot)"
+# Gdyby Lesson.Id bylo instancja lekcji (setki ID), fallback per element
+# zrobilby setki zapytan — powyzej limitu poddajemy sie (None).
+_MAX_LESSON_LOOKUPS = 30
+
+
+def _pct(present: int, total: int) -> float | None:
+    return round(present / total * 100.0, 2) if total else None
+
+
+def _attendance_stats(
+    attendances: list[dict],
+    lesson_subject: dict[Any, str],
+    current_semester: int,
+) -> dict[str, Any]:
+    """Frekwencja ogolna (per semestr) i per przedmiot z wpisow gateway API."""
+    sem: dict[int, list[int]] = {1: [0, 0], 2: [0, 0]}
+    subjects: dict[str, list[int]] = {}
+    for a in attendances:
+        kind = _ATTENDANCE_TYPES.get(str((a.get("Type") or {}).get("Id")), "")
+        attended = kind in _ATTENDED
+        subject = lesson_subject.get((a.get("Lesson") or {}).get("Id"), _UNKNOWN_SUBJECT)
+        bucket = subjects.setdefault(subject, [0, 0])
+        bucket[0] += attended
+        bucket[1] += 1
+        if (semester := a.get("Semester")) in sem:
+            sem[semester][0] += attended
+            sem[semester][1] += 1
+    present = sem[1][0] + sem[2][0]
+    total = sem[1][1] + sem[2][1]
+    overall = {
+        "semester_1": _pct(*sem[1]),
+        "semester_2": _pct(*sem[2]),
+        "total": _pct(present, total),
+    }
+    overall["current"] = overall["semester_1" if current_semester == 1 else "semester_2"]
+    return {
+        "overall": overall,
+        "by_subject": {
+            name: {"present": p, "missed": t - p, "total": t, "frequency": _pct(p, t)}
+            for name, (p, t) in sorted(subjects.items())
+        },
+    }
+
+
 def _token_still_valid(client: Client) -> bool:
     """True gdy token dziala — sonda na stronie informacji o uczniu."""
     try:
@@ -412,6 +470,8 @@ class LibrusApiClient:
         self._grades_module_missing = False
         # Szkola bez uwag w gateway API — ostrzegaj raz, potem debug.
         self._notes_warned = False
+        self._attendance_warned = False
+        self._attendance_stats_logged = False
         self._humanize = humanize
         # UA wybrany raz przy starcie integracji — przeglądarka też nie
         # zmienia UA mid-session. Stabilny do reloadu.
@@ -1019,6 +1079,75 @@ class LibrusApiClient:
             return _map_notes(notes, categories, teachers)
 
         return await self._with_retry("notes", _work)
+
+    async def async_get_attendance_stats(self) -> dict[str, Any] | None:
+        """Frekwencja z gateway API: `overall` (semestry) i `by_subject`.
+
+        Lista HTML frekwencji ma tylko nieobecnosci/spoznienia, bez obecnosci,
+        wiec liczona z niej frekwencja zawsze wychodzila 0. Gateway
+        `Attendances` ma wszystkie wpisy; przedmiot przez hurtowe `Lessons`
+        i `Subjects` (3 zapytania), brakujace lekcje pojedynczo (z limitem).
+        Zla odpowiedz -> None bez wyjatku (wyjatek resetowalby logowanie).
+        """
+
+        def _work(client: Client) -> dict[str, Any] | None:
+            client.refresh_oauth()  # cookie oauth_token wymagane przez gateway API
+            try:
+                payload = client.get(librus_urls.GATEWAY_API_ATTENDANCE).json()
+            except ValueError:
+                payload = None
+            attendances = payload.get("Attendances") if isinstance(payload, dict) else None
+            if attendances is None:
+                log = _LOGGER.debug if self._attendance_warned else _LOGGER.warning
+                log("Frekwencja: brak pola 'Attendances' w odpowiedzi gateway API")
+                self._attendance_warned = True
+                return None
+
+            lesson_to_subject_id = _gateway_lookup(
+                client, _GATEWAY_LESSONS, "Lessons",
+                lambda l: (l.get("Subject") or {}).get("Id"),
+            )
+            subject_names = _gateway_lookup(
+                client, _GATEWAY_SUBJECTS, "Subjects", lambda s: s.get("Name", ""),
+            )
+            lesson_ids = {(a.get("Lesson") or {}).get("Id") for a in attendances} - {None}
+            missing = [i for i in lesson_ids if i not in lesson_to_subject_id]
+            if len(missing) > _MAX_LESSON_LOOKUPS:
+                _LOGGER.warning(
+                    "Frekwencja: %d lekcji bez przedmiotu w hurtowej liście "
+                    "(limit %d) — pomijam przeliczenie", len(missing), _MAX_LESSON_LOOKUPS,
+                )
+                return None
+            for lesson_id in missing:
+                try:
+                    lesson = client.get(f"{_GATEWAY_LESSONS}/{lesson_id}").json()["Lesson"]
+                    lesson_to_subject_id[lesson_id] = (lesson.get("Subject") or {}).get("Id")
+                except Exception:  # noqa: BLE001 — przedmiot "nieznany"
+                    continue
+            lesson_subject: dict[Any, str] = {}
+            for lesson_id, subject_id in lesson_to_subject_id.items():
+                if subject_id is None:
+                    continue
+                if subject_id not in subject_names:
+                    try:
+                        subject_names[subject_id] = client.get(
+                            f"{_GATEWAY_SUBJECTS}/{subject_id}"
+                        ).json()["Subject"]["Name"]
+                    except Exception:  # noqa: BLE001
+                        continue
+                lesson_subject[lesson_id] = subject_names[subject_id]
+
+            if not self._attendance_stats_logged:
+                _LOGGER.info(
+                    "Frekwencja z gateway API: wpisy=%d lekcje=%d dociągnięte=%d "
+                    "bez_przedmiotu=%d",
+                    len(attendances), len(lesson_ids), len(missing),
+                    len(lesson_ids - set(lesson_subject)),
+                )
+                self._attendance_stats_logged = True
+            return _attendance_stats(attendances, lesson_subject, _current_semester())
+
+        return await self._with_retry("attendance_stats", _work)
 
 
     async def async_get_message_content(self, href: str) -> dict[str, str] | None:

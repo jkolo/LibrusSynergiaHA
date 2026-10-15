@@ -7,88 +7,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from homeassistant.core import HomeAssistant
 
-from custom_components.librus_apix.coordinator import (
-    LibrusDataUpdateCoordinator,
-    _attendance_by_subject,
-    _attendance_frequency,
-)
-
-
-# ---------------------------------------------------------------------------
-# Pure helper functions
-# ---------------------------------------------------------------------------
-
-
-class TestAttendanceFrequency:
-    def test_empty_returns_zeros(self):
-        result = _attendance_frequency([], current_semester=1)
-        assert result == {
-            "semester_1": 0.0,
-            "semester_2": 0.0,
-            "total": 0.0,
-            "current": 0.0,
-        }
-
-    def test_all_present_is_100_percent(self):
-        attendance = [
-            {"semester": 1, "is_present": True, "is_absence": False, "is_late": False, "excursion": False},
-            {"semester": 1, "is_present": True, "is_absence": False, "is_late": False, "excursion": False},
-        ]
-        result = _attendance_frequency(attendance, current_semester=1)
-        assert result["semester_1"] == 100.0
-        assert result["current"] == 100.0
-
-    def test_one_absence_in_three_lessons(self):
-        attendance = [
-            {"semester": 1, "is_present": True, "is_absence": False, "is_late": False, "excursion": False},
-            {"semester": 1, "is_present": True, "is_absence": False, "is_late": False, "excursion": False},
-            {"semester": 1, "is_present": False, "is_absence": True, "is_late": False, "excursion": False},
-        ]
-        result = _attendance_frequency(attendance, current_semester=1)
-        # 2 / 3 ≈ 66.67 %
-        assert result["semester_1"] == pytest.approx(66.67, abs=0.01)
-
-    def test_excursion_counts_as_present(self):
-        attendance = [
-            {"semester": 1, "is_present": False, "is_absence": False, "is_late": False, "excursion": True},
-            {"semester": 1, "is_present": False, "is_absence": True, "is_late": False, "excursion": False},
-        ]
-        result = _attendance_frequency(attendance, current_semester=1)
-        # 1 (excursion) / 2 = 50 %
-        assert result["semester_1"] == 50.0
-
-    def test_late_counts_as_missed(self):
-        attendance = [
-            {"semester": 1, "is_present": True, "is_absence": False, "is_late": False, "excursion": False},
-            {"semester": 1, "is_present": False, "is_absence": False, "is_late": True, "excursion": False},
-        ]
-        result = _attendance_frequency(attendance, current_semester=1)
-        assert result["semester_1"] == 50.0
-
-    def test_current_picks_right_semester(self):
-        attendance = [
-            {"semester": 1, "is_present": True, "is_absence": False, "is_late": False, "excursion": False},
-            {"semester": 2, "is_present": False, "is_absence": True, "is_late": False, "excursion": False},
-        ]
-        sem1 = _attendance_frequency(attendance, current_semester=1)
-        sem2 = _attendance_frequency(attendance, current_semester=2)
-        assert sem1["current"] == 100.0
-        assert sem2["current"] == 0.0
-
-
-class TestAttendanceBySubject:
-    def test_empty_returns_empty_dict(self):
-        assert _attendance_by_subject([]) == {}
-
-    def test_groups_by_subject(self):
-        attendance = [
-            {"subject": "Matematyka", "is_present": True, "is_absence": False, "is_late": False, "excursion": False},
-            {"subject": "Matematyka", "is_present": False, "is_absence": True, "is_late": False, "excursion": False},
-            {"subject": "Polski", "is_present": True, "is_absence": False, "is_late": False, "excursion": False},
-        ]
-        result = _attendance_by_subject(attendance)
-        assert result["Matematyka"] == {"present": 1, "missed": 1, "frequency": 50.0}
-        assert result["Polski"] == {"present": 1, "missed": 0, "frequency": 100.0}
+from custom_components.librus_apix.coordinator import LibrusDataUpdateCoordinator
 
 
 # ---------------------------------------------------------------------------
@@ -132,6 +51,10 @@ def fake_client_with_attendance(mock_student_info):
     ])
     client.async_get_homework = AsyncMock(return_value=[])
     client.async_get_notes = AsyncMock(return_value=[])
+    client.async_get_attendance_stats = AsyncMock(return_value={
+        "overall": {"semester_1": None, "semester_2": 90.0, "total": 90.0, "current": 90.0},
+        "by_subject": {"Matematyka": {"present": 9, "missed": 1, "total": 10, "frequency": 90.0}},
+    })
     client.async_get_announcements = AsyncMock(return_value=[
         {
             "title": "Wycieczka do Krakowa",
@@ -153,14 +76,24 @@ async def test_coordinator_data_includes_attendance_fields(
 
     data = coordinator.data
     assert len(data["attendance"]) == 3
-    # frequency: 1 obecny / (1 + 1 nieobecny + 1 spóźnienie) = 33.33 %
-    freq = data["attendance_frequency"]
-    assert freq["semester_2"] == pytest.approx(33.33, abs=0.01)
-    assert "current" in freq
+    # Frekwencja z gateway API (async_get_attendance_stats), nie z listy HTML.
+    assert data["attendance_frequency"]["current"] == 90.0
+    assert data["attendance_by_subject"]["Matematyka"]["frequency"] == 90.0
 
-    by_subj = data["attendance_by_subject"]
-    assert by_subj["Matematyka"]["present"] == 1
-    assert by_subj["Polski"]["missed"] == 1
+
+async def test_attendance_stats_none_keeps_cached(
+    hass: HomeAssistant, fake_client_with_attendance
+):
+    coordinator = LibrusDataUpdateCoordinator(hass, fake_client_with_attendance)
+    await coordinator.async_refresh()
+    await hass.async_block_till_done()
+
+    fake_client_with_attendance.async_get_attendance_stats = AsyncMock(return_value=None)
+    await coordinator.async_refresh()
+    await hass.async_block_till_done()
+
+    assert coordinator.data["attendance_frequency"]["current"] == 90.0
+    assert "Matematyka" in coordinator.data["attendance_by_subject"]
 
 
 async def test_coordinator_data_includes_announcements(

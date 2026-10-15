@@ -424,8 +424,10 @@ class TestNotesSensor:
 
 
 class TestValFrequency:
-    def test_empty_returns_zero(self):
-        assert _val_frequency({"attendance_frequency": {}}) == 0.0
+    def test_empty_returns_none_not_zero(self):
+        # 0.0 udawało prawdziwą frekwencję (produkcja: zawsze 0,0).
+        assert _val_frequency({"attendance_frequency": {}}) is None
+        assert _val_frequency({"attendance_frequency": {"current": None}}) is None
 
     def test_returns_current_semester(self):
         data = {"attendance_frequency": {
