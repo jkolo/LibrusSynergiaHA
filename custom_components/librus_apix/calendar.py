@@ -13,6 +13,7 @@ Cztery kalendarze per config_entry (per dziecko):
 from __future__ import annotations
 
 import logging
+import unicodedata
 from datetime import date as _date, datetime, time, timedelta
 from typing import Any
 
@@ -161,6 +162,48 @@ def _schedule_event_to_calendar_event(event_dict: dict) -> CalendarEvent | None:
     )
 
 
+# Klucze `info` z planu lekcji Librusa (tekst dymka) -> tag w summary.
+# Kolejnosc = priorytet: dzien wolny > odwolane > zastepstwo.
+_LESSON_INFO_TAGS = (
+    ("dzien wolny", ("WOLNE", "🏖️")),
+    ("odwolan", ("ODWOLANE", "❌")),
+    ("zastep", ("ZASTEPSTWO", "🔄")),
+)
+_SWAP_LABELS = (
+    ("teacher_swap", "Nauczyciel"),
+    ("subject_swap", "Przedmiot"),
+    ("classroom_swap", "Sala"),
+    ("date_added", "Dodano"),
+)
+
+
+def _fold(text: str) -> str:
+    """Male litery bez polskich znakow (ł -> l nie rozklada sie w NFKD)."""
+    text = text.lower().replace("ł", "l")
+    return unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode()
+
+
+def _lesson_tag(info: dict) -> tuple[str, str] | None:
+    keys = [_fold(str(k)) for k in info]
+    for fragment, tag in _LESSON_INFO_TAGS:
+        if any(fragment in k for k in keys):
+            return tag
+    return None
+
+
+def _lesson_info_text(key: str, value: Any) -> str:
+    """Czytelny opis wpisu `info`: zastepstwo jako lista zmian, nie dict."""
+    if isinstance(value, dict):
+        lines = [f"{key[:1].upper()}{key[1:]}:"]
+        for field, label in _SWAP_LABELS:
+            text = str(value.get(field) or "").strip()
+            if text:
+                text = text.replace("->", "→").replace("[brak]", "brak")
+                lines.append(f"  {label}: {text}")
+        return "\n".join(lines)
+    return f"{key}: {value}" if value else str(key)
+
+
 def _lesson_to_calendar_event(period: dict) -> CalendarEvent | None:
     """Konwertuj period planu lekcji na HA CalendarEvent."""
     date_iso = period.get("date")
@@ -189,8 +232,11 @@ def _lesson_to_calendar_event(period: dict) -> CalendarEvent | None:
         desc_parts.append(teacher_classroom)
     info = period.get("info") or {}
     for k, v in info.items():
-        desc_parts.append(f"{k}: {v}")
+        desc_parts.append(_lesson_info_text(k, v))
     description = "\n".join(desc_parts)
+    tag = _lesson_tag(info)
+    if tag:
+        summary = f"{tag[1]} [{tag[0]}] {summary}"
 
     return CalendarEvent(
         start=start_dt,
