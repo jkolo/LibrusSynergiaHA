@@ -41,6 +41,7 @@ def mock_validate_input():
         instance.async_get_homework = AsyncMock(return_value=[])
         instance.async_get_notes = AsyncMock(return_value=[])
         instance.async_get_behavior = AsyncMock(return_value={})
+        instance.async_get_completed_lessons = AsyncMock(return_value=[])
         instance.async_get_attendance_stats = AsyncMock(return_value=None)
         instance.async_get_announcements = AsyncMock(return_value=[])
         yield m

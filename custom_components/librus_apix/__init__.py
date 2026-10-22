@@ -442,6 +442,49 @@ def _grade_numeric_value(grade: str) -> float | None:
     return value
 
 
+_COMPLETED_PAGE_SIZE = 15
+_COMPLETED_MAX_PAGES = 6
+# "Kowalska Anna [Nowak Maria]" — zastepca w nawiasie kwadratowym.
+_SUBSTITUTE_RE = re.compile(r"^(.*?)\s*\[(.+)\]\s*$")
+
+
+def _parse_completed_lessons(html: str) -> list[dict[str, Any]]:
+    """Wiersze strony "Zrealizowane lekcje".
+
+    Wlasny parser zamiast `librus_apix.completed_lessons`: biblioteka zaklada
+    stala liczbe kolumn (czesc szkol ma dodatkowa "e-Tablica") i rzuca
+    ParseError na cala strone przy jednym nietypowym wierszu. Komorki bez
+    klasy: nr lekcji, "przedmiot , nauczyciel", temat, … — frekwencje mamy
+    z gateway API, wiec jej nie czytamy.
+    """
+    from bs4 import BeautifulSoup
+
+    lessons = []
+    soup = BeautifulSoup(html, "lxml")
+    for tr in soup.select('table[class="decorated"] > tbody > tr'):
+        cells = [
+            td.get_text(" ", strip=True)
+            for td in tr.find_all("td", attrs={"class": None})
+        ]
+        day_td = tr.select_one("td.center.small")
+        day = _parse_librus_date(day_td.get_text(strip=True) if day_td else "")
+        if len(cells) < 3 or day is None:
+            continue
+        subject, _, teacher = (p.strip() for p in cells[1].partition(","))
+        substitute = ""
+        if m := _SUBSTITUTE_RE.match(teacher):
+            teacher, substitute = m.group(1).strip(), m.group(2).strip()
+        lessons.append({
+            "date": day.isoformat(),
+            "lesson_number": int(cells[0]) if cells[0].isdigit() else None,
+            "subject": subject,
+            "teacher": teacher,
+            "substitute": substitute,
+            "topic": cells[2],
+        })
+    return lessons
+
+
 _GATEWAY_NOTES = f"{librus_urls.GATEWAY_API_URL}/2.0/Notes"
 _GATEWAY_NOTE_CATEGORIES = f"{librus_urls.GATEWAY_API_URL}/2.0/Notes/Categories"
 
@@ -1034,6 +1077,50 @@ class LibrusApiClient:
             return upcoming
 
         return await self._with_retry("schedule", _work)
+
+    async def async_get_completed_lessons(
+        self, days: int = 7
+    ) -> list[dict[str, Any]] | None:
+        """Tematy zrealizowanych lekcji z ostatnich `days` dni.
+
+        Strona ma po 15 wpisow; dla numeru strony poza zakresem Librus zwraca
+        ostatnia strone jeszcze raz, wiec konczymy na krotkiej stronie albo
+        stronie bez nowych wierszy (limit `_COMPLETED_MAX_PAGES`). Bez
+        `get_max_page_number` — to byloby dodatkowe zapytanie.
+
+        Returns:
+            Lista dictow od najnowszego dnia, w dniu po numerze lekcji.
+        """
+        today = _date.today()
+        form = {
+            "data1": (today - timedelta(days=days)).isoformat(),
+            "data2": today.isoformat(),
+            "filtruj_id_przedmiotu": -1,
+            "porcjowanie_pojemnik1001": 1001,
+        }
+
+        def _work(client: Client) -> list[dict[str, Any]]:
+            lessons: list[dict[str, Any]] = []
+            seen: set[tuple] = set()
+            for page in range(_COMPLETED_MAX_PAGES):
+                response = client.post(
+                    client.COMPLETED_LESSONS_URL,
+                    data={**form, "numer_strony1001": page},
+                )
+                rows = _parse_completed_lessons(response.text)
+                new = [
+                    r for r in rows
+                    if (r["date"], r["lesson_number"], r["subject"], r["topic"]) not in seen
+                ]
+                seen.update((r["date"], r["lesson_number"], r["subject"], r["topic"]) for r in new)
+                lessons.extend(new)
+                if len(rows) < _COMPLETED_PAGE_SIZE or not new:
+                    break
+            lessons.sort(key=lambda r: r["lesson_number"] or 99)
+            lessons.sort(key=lambda r: r["date"], reverse=True)
+            return lessons
+
+        return await self._with_retry("completed_lessons", _work)
 
     async def async_get_homework(
         self, days_ahead: int = 30

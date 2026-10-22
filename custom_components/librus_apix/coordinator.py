@@ -148,6 +148,21 @@ def _behavior_keys(behavior: dict | None) -> list[tuple]:
     return keys
 
 
+def _attach_topics(timetable: list[dict], topics: list[dict]) -> list[dict]:
+    """Kopie lekcji planu z `topic` ze "Zrealizowanych lekcji" (data, nr)."""
+    by_slot = {
+        (t.get("date"), t.get("lesson_number")): t.get("topic")
+        for t in topics if t.get("topic")
+    }
+    result = []
+    for period in timetable:
+        period = {k: v for k, v in period.items() if k != "topic"}
+        if topic := by_slot.get((period.get("date"), period.get("lesson_number"))):
+            period["topic"] = topic
+        result.append(period)
+    return result
+
+
 def _is_recent(date_str: str) -> bool:
     """Return True if `date_str` parses to today or yesterday."""
     if not date_str:
@@ -206,7 +221,7 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._step_timestamps: dict[str, datetime | None] = {k: None for k in (
             "student_info", "grades", "messages", "schedule",
             "timetable", "attendance", "announcements", "homework", "notes",
-            "attendance_stats",
+            "attendance_stats", "lesson_topics",
         )}
         self._last_full_refresh: datetime | None = None
         self._seen_message_hrefs: OrderedDict[str, None] = OrderedDict()
@@ -467,6 +482,7 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 "homework": self.client.async_get_homework,
                 "notes": self.client.async_get_notes,
                 "attendance_stats": self.client.async_get_attendance_stats,
+                "lesson_topics": self.client.async_get_completed_lessons,
             }
             humanize = self._opt_humanize()
             order = (
@@ -483,7 +499,7 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 if results[name] is not None:
                     self._step_timestamps[name] = dt_util.utcnow()
                 # Skip jitter on first_run: HA cancels setup after ~60s,
-                # and 10 fetchers × up to 15s pause would exceed that limit.
+                # and 11 fetchers × up to 15s pause would exceed that limit.
                 if humanize and i < len(order) - 1 and not self._first_run:
                     pause = jitter_pause_seconds(self._rng)
                     _LOGGER.debug(
@@ -529,6 +545,12 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 stats["by_subject"] if stats is not None
                 else prev_data.get("attendance_by_subject", {})
             )
+            # Tematy lekcji: przy bledzie zostaje lista z cache.
+            topics = results["lesson_topics"]
+            topics_list = (
+                topics if topics is not None
+                else (self.data or {}).get("lesson_topics", [])
+            )
             # Uwagi: jak zadania — przy bledzie zostaje lista z cache.
             notes = results["notes"]
             notes_list = (
@@ -543,7 +565,7 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 v is None
                 for v in (
                     student_info, grades, messages, schedule_all, timetable,
-                    attendance, announcements, homework, notes, stats,
+                    attendance, announcements, homework, notes, stats, topics,
                 )
             )
             if all_none:
@@ -587,10 +609,11 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                         if schedule_all is not None
                         else prev.get("schedule", [])
                     ),
-                    "timetable": (
+                    "timetable": _attach_topics(
                         timetable
                         if timetable is not None
-                        else prev.get("timetable", [])
+                        else prev.get("timetable", []),
+                        topics_list,
                     ),
                     "attendance": (
                         attendance
@@ -607,6 +630,7 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     "homework": homework_list,
                     "notes": notes_list,
                     "behavior": behavior_data,
+                    "lesson_topics": topics_list,
                     "current_semester": current_semester,
                 }
 
@@ -661,7 +685,9 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 "messages": annotated_messages,
                 "upcoming_exams": exams_list,
                 "schedule": schedule_all if schedule_all is not None else [],
-                "timetable": timetable if timetable is not None else [],
+                "timetable": _attach_topics(
+                    timetable if timetable is not None else [], topics_list
+                ),
                 "attendance": attendance_list,
                 "attendance_frequency": attendance_frequency,
                 "attendance_by_subject": attendance_by_subject,
@@ -669,6 +695,7 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 "homework": homework_list,
                 "notes": notes_list,
                 "behavior": behavior_data,
+                "lesson_topics": topics_list,
                 "current_semester": current_semester,
             }
 

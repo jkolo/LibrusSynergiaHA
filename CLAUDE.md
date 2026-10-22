@@ -80,7 +80,7 @@ student_info, grades, grades_by_subject, messages,
 upcoming_exams (schedule filtrowany is_exam — dla next_exam/new_exam),
 schedule (pełny terminarz: event_type, is_exam, is_day_off, description, teacher, weekday, details),
 timetable, attendance, attendance_frequency, attendance_by_subject,
-announcements, homework (30 dni, due_date ISO), notes (uwagi z gateway API, od najnowszej), behavior (zachowanie, {} gdy szkoła nie pokazuje), current_semester
+announcements, homework (30 dni, due_date ISO), notes (uwagi z gateway API, od najnowszej), behavior (zachowanie, {} gdy szkoła nie pokazuje), lesson_topics (zrealizowane lekcje 7 dni, od najnowszej), current_semester
 ```
 
 Atrybuty sensorów muszą zmieścić się w **16 KB** (limit recordera) — listy wystawiaj w widoku kompaktowym, a dla dużych list przycinaj z flagą (wzór: `_attrs_schedule` → `events_truncated`). Pełne dane trzymaj w kalendarzu.
@@ -124,6 +124,10 @@ Lista HTML (`get_attendance`) ma tylko nieobecności/spóźnienia/zwolnienia —
 ### Uwagi
 
 `async_get_notes` czyta JSON z gateway API (`/gateway/api/2.0/Notes`, `Notes/Categories`, `Users`) po `client.refresh_oauth()` — jak `librus-apix` przy frekwencji. Zła odpowiedź `Notes` zwraca `None` **bez wyjątku**: wyjątek w `_with_retry` robi `_reset_auth()`, więc szkoła bez modułu uwag logowałaby się od nowa co cykl. `Positive`: 0 → `negative`, 1 → `positive`, 2 → `neutral` (wg forka procaktomasz, sprawdzone na prawdziwych kontach).
+
+### Tematy lekcji
+
+`async_get_completed_lessons` czyta stronę „Zrealizowane lekcje” (ostatnie 7 dni) **własnym parserem** `_parse_completed_lessons` — `librus_apix.completed_lessons` zakłada stałą liczbę kolumn (część szkół ma „e-Tablica”) i rzuca `ParseError` na całą stronę. Strony po 15 wpisów; dla numeru poza zakresem Librus zwraca ostatnią stronę ponownie, więc pętla kończy się na krótkiej stronie albo stronie bez nowych wierszy (limit 6). Koordynator dokleja `topic` do lekcji `timetable` po `(date, lesson_number)` (`_attach_topics`), kalendarz planu dopisuje „Temat:” do opisu.
 
 ### Zadania domowe
 

@@ -42,6 +42,7 @@ def fake_client_with_messages(mock_student_info):
     client.async_get_homework = AsyncMock(return_value=[])
     client.async_get_notes = AsyncMock(return_value=[])
     client.async_get_behavior = AsyncMock(return_value={})
+    client.async_get_completed_lessons = AsyncMock(return_value=[])
     client.async_get_attendance_stats = AsyncMock(return_value=None)
     client.async_get_announcements = AsyncMock(return_value=[])
     return client

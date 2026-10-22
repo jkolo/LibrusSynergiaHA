@@ -147,6 +147,7 @@ def coord_client(mock_student_info):
     client.async_get_student_information = AsyncMock(return_value=mock_student_info)
     client.async_get_grades = AsyncMock(return_value=[])
     client.async_get_behavior = AsyncMock(return_value=_behavior())
+    client.async_get_completed_lessons = AsyncMock(return_value=[])
     client.async_get_messages = AsyncMock(return_value=[])
     client.async_get_schedule_events = AsyncMock(return_value=[])
     client.async_get_timetable_events = AsyncMock(return_value=[])
@@ -169,6 +170,7 @@ async def test_coordinator_keeps_cached_behavior_on_failure(hass, coord_client) 
     coordinator = LibrusDataUpdateCoordinator(hass, coord_client)
     await coordinator.async_refresh()
     coord_client.async_get_behavior = AsyncMock(return_value=None)
+    coord_client.async_get_completed_lessons = AsyncMock(return_value=[])
     await coordinator.async_refresh()
 
     assert coordinator.data["behavior"]["points_sem1"] == 245
@@ -180,6 +182,8 @@ async def test_new_behavior_entry_event_after_first_run(hass, coord_client) -> N
     assert coordinator.consume_pending_event("new_behavior_entry") is None
 
     coord_client.async_get_behavior = AsyncMock(return_value=_behavior([ENTRY]))
+
+    coord_client.async_get_completed_lessons = AsyncMock(return_value=[])
     await coordinator.async_refresh()
 
     payload = coordinator.consume_pending_event("new_behavior_entry")
@@ -202,6 +206,7 @@ async def test_behavior_grade_change_fires_event(hass, coord_client) -> None:
 
 async def test_existing_entries_on_first_run_do_not_fire(hass, coord_client) -> None:
     coord_client.async_get_behavior = AsyncMock(return_value=_behavior([ENTRY]))
+    coord_client.async_get_completed_lessons = AsyncMock(return_value=[])
     coordinator = LibrusDataUpdateCoordinator(hass, coord_client)
     await coordinator.async_refresh()
     await coordinator.async_refresh()
@@ -264,6 +269,8 @@ async def _setup_entities(hass, entry, client, behavior) -> set[str]:
     from homeassistant.helpers import entity_registry as er
 
     client.async_get_behavior = AsyncMock(return_value=behavior)
+
+    client.async_get_completed_lessons = AsyncMock(return_value=[])
     entry.add_to_hass(hass)
     assert await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
