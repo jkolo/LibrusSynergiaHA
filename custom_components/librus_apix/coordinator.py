@@ -95,6 +95,7 @@ EVENT_KEY_NEW_ABSENCE = "new_absence"
 EVENT_KEY_NEW_HOMEWORK = "new_homework"
 EVENT_KEY_NEW_SCHEDULE_EVENT = "new_schedule_event"
 EVENT_KEY_NEW_NOTE = "new_note"
+EVENT_KEY_NEW_BEHAVIOR_ENTRY = "new_behavior_entry"
 EVENT_KEYS = (
     EVENT_KEY_NEW_MESSAGE,
     EVENT_KEY_NEW_GRADE,
@@ -104,6 +105,7 @@ EVENT_KEYS = (
     EVENT_KEY_NEW_HOMEWORK,
     EVENT_KEY_NEW_SCHEDULE_EVENT,
     EVENT_KEY_NEW_NOTE,
+    EVENT_KEY_NEW_BEHAVIOR_ENTRY,
 )
 
 
@@ -118,6 +120,32 @@ def _homework_key(hw: dict) -> tuple:
 def _schedule_key(ev: dict) -> tuple:
     """Identity of a schedule entry — same tuple as the new_exam detection."""
     return (ev.get("date", ""), ev.get("subject", ""), ev.get("title", ""))
+
+
+# Oceny z zachowania, ktorych zmiana wysyla new_behavior_entry.
+_BEHAVIOR_GRADE_FIELDS = ("predicted_sem1", "grade_sem1", "predicted_year", "grade_year")
+
+
+def _behavior_entry_key(entry: dict) -> tuple:
+    """Identity of a behaviour points entry (Librus gives no id)."""
+    return (
+        "entry", entry.get("date", ""), entry.get("category", ""),
+        entry.get("points"), entry.get("semester"),
+    )
+
+
+def _behavior_grade_key(field: str, grade: str) -> tuple:
+    return ("grade", field, grade)
+
+
+def _behavior_keys(behavior: dict | None) -> list[tuple]:
+    behavior = behavior or {}
+    keys = [_behavior_entry_key(e) for e in behavior.get("entries") or []]
+    keys += [
+        _behavior_grade_key(f, behavior[f])
+        for f in _BEHAVIOR_GRADE_FIELDS if behavior.get(f)
+    ]
+    return keys
 
 
 def _is_recent(date_str: str) -> bool:
@@ -189,6 +217,7 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._seen_homework_keys: OrderedDict[tuple, None] = OrderedDict()
         self._seen_schedule_keys: OrderedDict[tuple, None] = OrderedDict()
         self._seen_note_ids: OrderedDict[Any, None] = OrderedDict()
+        self._seen_behavior_keys: OrderedDict[tuple, None] = OrderedDict()
         self._first_run: bool = True
         # Tracks consecutive ticks where every endpoint returned None — used
         # to escalate to a repair issue suggesting a librus-apix upgrade
@@ -290,6 +319,8 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             _add_lru(self._seen_schedule_keys, _schedule_key(ev))
         for note in data.get("notes", []) or []:
             _add_lru(self._seen_note_ids, note.get("id"))
+        for key in _behavior_keys(data.get("behavior")):
+            _add_lru(self._seen_behavior_keys, key)
 
     # ---------- Options helpers (PR 6) ----------
 
@@ -462,6 +493,13 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
             student_info = results["student_info"]
             grades = results["grades"]
+            # Zachowanie z HTML tej samej strony ocen — odbierane od razu po
+            # petli, bo kolejnosc fetcherow jest losowa. None = cache.
+            behavior = await self.client.async_get_behavior()
+            behavior_data = (
+                behavior if behavior is not None
+                else (self.data or {}).get("behavior", {})
+            )
             messages = results["messages"]
             schedule_all = results["schedule"]
             upcoming_exams = (
@@ -568,6 +606,7 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     ),
                     "homework": homework_list,
                     "notes": notes_list,
+                    "behavior": behavior_data,
                     "current_semester": current_semester,
                 }
 
@@ -629,6 +668,7 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 "announcements": announcements_list,
                 "homework": homework_list,
                 "notes": notes_list,
+                "behavior": behavior_data,
                 "current_semester": current_semester,
             }
 
@@ -653,6 +693,7 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     annotated_messages, grades, exams_list,
                     announcements_list, attendance_list,
                     homework_list, result["schedule"], notes_list,
+                    behavior_data,
                 )
 
             if self.read_messages_store is not None:
@@ -711,6 +752,7 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         homework: list[dict],
         schedule: list[dict],
         notes: list[dict] | None = None,
+        behavior: dict | None = None,
     ) -> None:
         """Buffer payloads for newly observed items so event entities emit them.
 
@@ -885,6 +927,29 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 self._pending_events[EVENT_KEY_NEW_NOTE] = {
                     k: note.get(k)
                     for k in ("id", "date", "text", "kind", "category", "teacher")
+                }
+
+        # Cache sprzed zachowania nie ma klucza "behavior" — tylko seedujemy.
+        behavior = behavior or {}
+        if "behavior" not in (self.data or {}):
+            for key in _behavior_keys(behavior):
+                _add_lru(self._seen_behavior_keys, key)
+            behavior = {}
+
+        # Wpisy od najnowszego; od najstarszego, zeby w buforze zostal najnowszy.
+        for entry in reversed(behavior.get("entries") or []):
+            key = _behavior_entry_key(entry)
+            if key not in self._seen_behavior_keys:
+                _add_lru(self._seen_behavior_keys, key)
+                self._pending_events[EVENT_KEY_NEW_BEHAVIOR_ENTRY] = {
+                    "type": "entry", **entry,
+                }
+        for field in _BEHAVIOR_GRADE_FIELDS:
+            grade = behavior.get(field)
+            if grade and (key := _behavior_grade_key(field, grade)) not in self._seen_behavior_keys:
+                _add_lru(self._seen_behavior_keys, key)
+                self._pending_events[EVENT_KEY_NEW_BEHAVIOR_ENTRY] = {
+                    "type": "grade", "field": field, "grade": grade,
                 }
 
     def _annotate_messages(self, messages: list[dict] | None) -> list[dict]:

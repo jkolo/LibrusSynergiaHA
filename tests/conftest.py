@@ -77,6 +77,7 @@ def mock_librus_client(mock_student_info) -> Generator[MagicMock, None, None]:
         instance.async_get_attendance = AsyncMock(return_value=[])
         instance.async_get_homework = AsyncMock(return_value=[])
         instance.async_get_notes = AsyncMock(return_value=[])
+        instance.async_get_behavior = AsyncMock(return_value={})
         instance.async_get_attendance_stats = AsyncMock(return_value=None)
         instance.async_get_announcements = AsyncMock(return_value=[])
         yield instance
