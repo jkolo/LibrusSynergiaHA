@@ -456,11 +456,16 @@ def _parse_completed_lessons(html: str) -> list[dict[str, Any]]:
     ParseError na cala strone przy jednym nietypowym wierszu. Komorki bez
     klasy: nr lekcji, "przedmiot , nauczyciel", temat, … — frekwencje mamy
     z gateway API, wiec jej nie czytamy.
+
+    Raises:
+        TokenError: strona "Brak dostępu" (wygasla sesja) — jak w bibliotece,
+            zeby `_with_retry` zalogowal sie ponownie zamiast zwrocic [].
     """
     from bs4 import BeautifulSoup
+    from librus_apix.helpers import no_access_check
 
     lessons = []
-    soup = BeautifulSoup(html, "lxml")
+    soup = no_access_check(BeautifulSoup(html, "lxml"))
     for tr in soup.select('table[class="decorated"] > tbody > tr'):
         cells = [
             td.get_text(" ", strip=True)

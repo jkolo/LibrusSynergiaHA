@@ -122,11 +122,38 @@ async def test_fetch_error_returns_none(hass, client) -> None:
     client._client.post.side_effect = RuntimeError("boom")
 
     async def _reauth():
+        failing = MagicMock()
+        failing.post.side_effect = RuntimeError("boom")
+        client._client = failing
         client._token = "fake"
         return True
 
     with patch.object(client, "async_authenticate", AsyncMock(side_effect=_reauth)):
         assert await client.async_get_completed_lessons() is None
+
+
+async def test_expired_session_reauthenticates(hass, client) -> None:
+    # "Brak dostepu" = wygasla sesja; bez sprawdzenia dostalibysmy [] i
+    # koordynator nadpisalby cache pusta lista.
+    client._client.post.return_value = MagicMock(
+        text='<h2 class="inside">Brak dostępu</h2>'
+    )
+    fresh = MagicMock()
+    fresh.COMPLETED_LESSONS_URL = client._client.COMPLETED_LESSONS_URL
+    fresh.post.return_value = MagicMock(
+        text=_page(_row("2026-10-06", "1", "Chemia , L", "Mieszaniny"))
+    )
+
+    async def _reauth():
+        client._client = fresh
+        client._token = "fake"
+        return True
+
+    with patch.object(client, "async_authenticate", AsyncMock(side_effect=_reauth)) as auth:
+        lessons = await client.async_get_completed_lessons()
+
+    auth.assert_awaited_once()
+    assert [l["topic"] for l in lessons] == ["Mieszaniny"]
 
 
 # ---------------------------------------------------------------------------
