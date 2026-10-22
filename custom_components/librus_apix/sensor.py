@@ -238,6 +238,43 @@ def _attrs_schedule(data: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+# Tematy lekcji: lista od najnowszej w budzecie bajtow + ostatni temat per
+# przedmiot; temat przycinany (opisy potrafia miec kilkaset znakow).
+_TOPICS_LESSONS_BUDGET = 10_000
+_TOPIC_MAX = 200
+
+
+def _short_topic(topic: str) -> str:
+    return topic if len(topic) <= _TOPIC_MAX else topic[: _TOPIC_MAX - 1] + "…"
+
+
+def _val_lesson_topics(data: dict[str, Any]) -> StateType:
+    """Liczba dzisiejszych zrealizowanych lekcji."""
+    today = date.today().isoformat()
+    return sum(1 for l in data.get("lesson_topics") or [] if l.get("date") == today)
+
+
+def _attrs_lesson_topics(data: dict[str, Any]) -> dict[str, Any]:
+    lessons = data.get("lesson_topics") or []  # od najnowszej
+    by_subject: dict[str, str] = {}
+    for l in lessons:
+        by_subject.setdefault(l.get("subject", ""), _short_topic(l.get("topic") or ""))
+    shown: list[dict[str, Any]] = []
+    used = 0
+    for l in lessons:
+        view = dict(l, topic=_short_topic(l.get("topic") or ""))
+        size = len(json.dumps(view, ensure_ascii=False).encode())
+        if used + size > _TOPICS_LESSONS_BUDGET:
+            break
+        shown.append(view)
+        used += size
+    return {
+        "lessons": shown,
+        "lessons_truncated": len(shown) < len(lessons),
+        "by_subject": by_subject,
+    }
+
+
 # Uwagi: 20 najnowszych, tresc przycinana — limit 16 KB recordera.
 _NOTES_ATTR_MAX = 20
 _NOTE_TEXT_MAX = 300
@@ -692,6 +729,13 @@ SENSORS: tuple[LibrusSensorEntityDescription, ...] = (
         state_class=SensorStateClass.MEASUREMENT,
         value_fn=_val_notes_count,
         attrs_fn=_attrs_notes,
+    ),
+    LibrusSensorEntityDescription(
+        key="tematy",
+        translation_key="lesson_topics",
+        icon="mdi:book-open-variant",
+        value_fn=_val_lesson_topics,
+        attrs_fn=_attrs_lesson_topics,
     ),
     LibrusSensorEntityDescription(
         key="zachowanie",

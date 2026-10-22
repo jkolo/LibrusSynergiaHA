@@ -233,6 +233,9 @@ def _lesson_to_calendar_event(period: dict) -> CalendarEvent | None:
     info = period.get("info") or {}
     for k, v in info.items():
         desc_parts.append(_lesson_info_text(k, v))
+    # Temat dolacza koordynator ze "Zrealizowanych lekcji" (tylko minione).
+    if topic := period.get("topic"):
+        desc_parts.append(f"Temat: {topic}")
     description = "\n".join(desc_parts)
     tag = _lesson_tag(info)
     if tag:

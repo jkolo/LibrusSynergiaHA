@@ -53,6 +53,7 @@ def fake_client(mock_student_info):
     client.async_get_homework = AsyncMock(return_value=[])
     client.async_get_notes = AsyncMock(return_value=[])
     client.async_get_behavior = AsyncMock(return_value={})
+    client.async_get_completed_lessons = AsyncMock(return_value=[])
     client.async_get_attendance_stats = AsyncMock(return_value=None)
     client.async_get_announcements = AsyncMock(return_value=[])
     return client
@@ -188,6 +189,7 @@ async def test_repair_issue_lib_outdated_after_threshold(
     fake_client.async_get_announcements = AsyncMock(return_value=None)
     fake_client.async_get_notes = AsyncMock(return_value=None)
     fake_client.async_get_attendance_stats = AsyncMock(return_value=None)
+    fake_client.async_get_completed_lessons = AsyncMock(return_value=None)
 
     issue_id = coordinator._issue_id(ISSUE_LIB_OUTDATED)
     registry = ir.async_get(hass)
@@ -229,6 +231,7 @@ async def test_repair_issue_lib_outdated_clears_on_recovery(
     fake_client.async_get_announcements = AsyncMock(return_value=None)
     fake_client.async_get_notes = AsyncMock(return_value=None)
     fake_client.async_get_attendance_stats = AsyncMock(return_value=None)
+    fake_client.async_get_completed_lessons = AsyncMock(return_value=None)
     for _ in range(5):
         await coordinator.async_refresh()
         await hass.async_block_till_done()
@@ -339,8 +342,8 @@ async def test_pause_invoked_between_endpoints(hass: HomeAssistant, fake_client)
         await coordinator.async_refresh()
         await hass.async_block_till_done()
 
-    # 10 fetcherow → 9 pauz między nimi.
-    assert len(pause_seconds) == 9
+    # 11 fetcherow → 10 pauz między nimi.
+    assert len(pause_seconds) == 10
 
 
 async def test_schedule_next_refresh_uses_async_call_later(
@@ -670,6 +673,7 @@ async def test_notes_none_keeps_cached(hass: HomeAssistant, fake_client):
 
     fake_client.async_get_notes = AsyncMock(return_value=None)
     fake_client.async_get_attendance_stats = AsyncMock(return_value=None)
+    fake_client.async_get_completed_lessons = AsyncMock(return_value=None)
     await coordinator.async_refresh()
     await hass.async_block_till_done()
 

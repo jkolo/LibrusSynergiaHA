@@ -52,6 +52,7 @@ def fake_client_with_attendance(mock_student_info):
     client.async_get_homework = AsyncMock(return_value=[])
     client.async_get_notes = AsyncMock(return_value=[])
     client.async_get_behavior = AsyncMock(return_value={})
+    client.async_get_completed_lessons = AsyncMock(return_value=[])
     client.async_get_attendance_stats = AsyncMock(return_value={
         "overall": {"semester_1": None, "semester_2": 90.0, "total": 90.0, "current": 90.0},
         "by_subject": {"Matematyka": {"present": 9, "missed": 1, "total": 10, "frequency": 90.0}},

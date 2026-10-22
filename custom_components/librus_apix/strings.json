@@ -112,6 +112,9 @@
       },
       "behavior_points": {
         "name": "Behavior points"
+      },
+      "lesson_topics": {
+        "name": "Lesson topics"
       }
     },
     "calendar": {
