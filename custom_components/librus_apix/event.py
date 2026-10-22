@@ -2,7 +2,7 @@
 
 Replaces the legacy `hass.bus.fire` mechanism. Each event entity (`new_grade`,
 `new_message`, `new_exam`, `new_announcement`, `new_absence`, `new_homework`,
-`new_schedule_event`, `new_note`) reads pending
+`new_schedule_event`, `new_note`, `new_behavior_entry`) reads pending
 payloads from the coordinator on every refresh — when present, it triggers
 an event of type `"new"` carrying the payload as attributes.
 
@@ -80,6 +80,12 @@ EVENTS: tuple[LibrusEventEntityDescription, ...] = (
         key="new_note",
         translation_key="new_note",
         icon="mdi:alert-box-outline",
+        event_types=["new"],
+    ),
+    LibrusEventEntityDescription(
+        key="new_behavior_entry",
+        translation_key="new_behavior_entry",
+        icon="mdi:emoticon-outline",
         event_types=["new"],
     ),
 )

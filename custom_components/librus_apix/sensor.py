@@ -22,7 +22,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.typing import StateType
 from homeassistant.util import slugify
 
-from .coordinator import LibrusDataUpdateCoordinator
+from .coordinator import _BEHAVIOR_GRADE_FIELDS, LibrusDataUpdateCoordinator
 from .entity import LibrusBaseEntity
 
 _LOGGER = logging.getLogger(__name__)
@@ -268,6 +268,52 @@ def _attrs_notes(data: dict[str, Any]) -> dict[str, Any]:
         "negative": kinds.count("negative"),
         "neutral": kinds.count("neutral"),
         "latest": shown[0] if shown else None,
+    }
+
+
+# Zachowanie: ocena (tekst) i osobny sensor punktow — stan liczbowy i tekstowy
+# w jednej encji psulby state_class/jednostke i historie.
+_BEHAVIOR_ENTRIES_MAX = 20
+
+
+def _val_behavior(data: dict[str, Any]) -> StateType:
+    """Najnowsza ocena z zachowania: wystawiona przed przewidywana."""
+    behavior = data.get("behavior") or {}
+    order = ("grade_sem1", "predicted_sem1")
+    if data.get("current_semester") == 2:
+        order = ("grade_year", "predicted_year") + order
+    return next((behavior[k] for k in order if behavior.get(k)), None)
+
+
+def _attrs_behavior(data: dict[str, Any]) -> dict[str, Any]:
+    behavior = data.get("behavior") or {}
+    attrs = {k: behavior.get(k, "") for k in _BEHAVIOR_GRADE_FIELDS}
+    attrs["system"] = behavior.get("system")
+    return attrs
+
+
+def _val_behavior_points(data: dict[str, Any]) -> StateType:
+    """Suma punktow z zachowania w biezacym okresie."""
+    behavior = data.get("behavior") or {}
+    return behavior.get(f"points_sem{data.get('current_semester', 1)}")
+
+
+def _attrs_behavior_points(data: dict[str, Any]) -> dict[str, Any]:
+    behavior = data.get("behavior") or {}
+    entries = behavior.get("entries") or []  # od najnowszego
+    semester = data.get("current_semester", 1)
+    points = [
+        e.get("points") or 0 for e in entries if e.get("semester") == semester
+    ]
+    shown = entries[:_BEHAVIOR_ENTRIES_MAX]
+    return {
+        "points_start": behavior.get("points_start"),
+        "points_sem1": behavior.get("points_sem1"),
+        "points_sem2": behavior.get("points_sem2"),
+        "positive_sum": sum(p for p in points if p > 0),
+        "negative_sum": sum(p for p in points if p < 0),
+        "entries": shown,
+        "entries_truncated": len(shown) < len(entries),
     }
 
 
@@ -647,6 +693,13 @@ SENSORS: tuple[LibrusSensorEntityDescription, ...] = (
         value_fn=_val_notes_count,
         attrs_fn=_attrs_notes,
     ),
+    LibrusSensorEntityDescription(
+        key="zachowanie",
+        translation_key="behavior",
+        icon="mdi:emoticon-outline",
+        value_fn=_val_behavior,
+        attrs_fn=_attrs_behavior,
+    ),
     # ---- v3.0 NEW: latest_/next_ sensors ----
     LibrusSensorEntityDescription(
         key="latest_grade",
@@ -710,6 +763,17 @@ SENSORS: tuple[LibrusSensorEntityDescription, ...] = (
         value_fn=_val_latest_announcement,
         attrs_fn=_attrs_latest_announcement,
     ),
+)
+
+# Poza SENSORS — tworzony dopiero, gdy szkola ma punktowy system zachowania.
+BEHAVIOR_POINTS_SENSOR = LibrusSensorEntityDescription(
+    key="punkty_zachowania",
+    translation_key="behavior_points",
+    icon="mdi:counter",
+    state_class=SensorStateClass.MEASUREMENT,
+    native_unit_of_measurement="pkt",
+    value_fn=_val_behavior_points,
+    attrs_fn=_attrs_behavior_points,
 )
 
 
@@ -935,3 +999,23 @@ async def async_setup_entry(
     # Initial add + listener for every subsequent refresh.
     _add_subject_sensors()
     config_entry.async_on_unload(coordinator.async_add_listener(_add_subject_sensors))
+
+    # Punkty z zachowania — tylko w szkolach z systemem punktowym; szkola
+    # moze go wlaczyc w trakcie roku, wiec tez przez listener.
+    points_added = False
+
+    @callback
+    def _add_behavior_points_sensor() -> None:
+        nonlocal points_added
+        behavior = (coordinator.data or {}).get("behavior") or {}
+        if points_added or behavior.get("system") != "points":
+            return
+        points_added = True
+        async_add_entities([
+            LibrusSensor(coordinator, config_entry, BEHAVIOR_POINTS_SENSOR)
+        ])
+
+    _add_behavior_points_sensor()
+    config_entry.async_on_unload(
+        coordinator.async_add_listener(_add_behavior_points_sensor)
+    )

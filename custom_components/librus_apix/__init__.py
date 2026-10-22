@@ -311,6 +311,124 @@ def _tooltip_counts_and_weight(desc: str) -> tuple[bool | None, int | None]:
     return counts, weight
 
 
+def _behavior_points(text: str) -> int | float | None:
+    """'-20' → -20, '1,5' → 1.5, inny tekst → None."""
+    text = text.strip().replace(",", ".")
+    try:
+        return float(text) if "." in text else int(text)
+    except ValueError:
+        return None
+
+
+def _behavior_cell_value(td: Any) -> str:
+    val = td.get_text(strip=True)
+    return "" if val == "-" else val
+
+
+def _parse_behavior_entries(td: Any, semester: int) -> list[dict[str, Any]]:
+    """Wpisy punktowe z komorki okresu (span.grade-box > a, tooltip w title)."""
+    entries = []
+    for a in td.select("span.grade-box > a"):
+        value = a.get_text(strip=True)
+        box = a.find_parent("span", class_="grade-box")
+        negative = "negative-behaviour" in (box.get("class") or []) or value.startswith("-")
+        # Tooltip: "Kategoria(-20)<br/>Zakres od: …<br />Data wystawienia: …"
+        lines = [p.strip() for p in re.split(r"<br\s*/?>", a.get("title", ""))]
+        fields = dict(
+            line.split(":", 1) for line in lines[1:] if ":" in line
+        )
+        entries.append({
+            "date": fields.get("Data wystawienia", "").strip(),
+            "category": re.sub(r"\([-+]?\d+(?:[.,]\d+)?\)$", "", lines[0]).strip(),
+            "points": _behavior_points(value),
+            "kind": "negative" if negative else "positive",
+            "teacher": fields.get("Dodał", "").strip(),
+            "comment": fields.get("Komentarz", "").strip(),
+            "semester": semester,
+        })
+    return entries
+
+
+def _parse_behavior(html: str) -> dict[str, Any] | None:
+    """Zachowanie ze strony ocen; None gdy szkola go nie pokazuje.
+
+    librus-apix nie parsuje wiersza "Zachowanie". Wiersz glowny
+    (`#przedmioty_zachowanie_node`) ma komorki: nazwa, okres 1 (wpisy
+    punktowe), srodroczna, okres 2, roczna; podtabela `#przedmioty_zachowanie`
+    ma punkty startowe, sumy i oceny przewidywane. Struktura wg forka
+    procaktomasz/LibrusSynergiaHA (sprawdzona na prawdziwych kontach).
+    """
+    from bs4 import BeautifulSoup
+
+    soup = BeautifulSoup(html, "lxml")
+    node = soup.select_one("#przedmioty_zachowanie_node")
+    main_row = node.find_parent("tr") if node else None
+    sub_table = soup.select_one("#przedmioty_zachowanie")
+    if main_row is None and sub_table is None:
+        return None
+
+    result: dict[str, Any] = {
+        "system": "grades",
+        "points_start": None,
+        "points_sem1": None,
+        "points_sem2": None,
+        "predicted_sem1": "",
+        "predicted_year": "",
+        "grade_sem1": "",
+        "grade_year": "",
+        "entries": [],
+    }
+
+    if sub_table is not None:
+        semester = 1
+        for tr in sub_table.find_all("tr"):
+            text = tr.get_text(" ", strip=True)
+            if "Okres 1" in text:
+                semester = 1
+                continue
+            if "Okres 2" in text:
+                semester = 2
+                continue
+            number = next(
+                (p for td in tr.find_all("td")
+                 if (p := _behavior_points(td.get_text(strip=True))) is not None),
+                None,
+            )
+            if "Punkty startowe" in text:
+                result["points_start"] = number
+            elif "Suma" in text:
+                result[f"points_sem{semester}"] = number
+            elif "przewidywana" in text and ":" in text:
+                value = text.split(":", 1)[1].strip()
+                if value and value != "-":
+                    key = "predicted_sem1" if "śródroczna" in text else "predicted_year"
+                    result[key] = value
+
+    if main_row is not None:
+        cells = [
+            td for td in main_row.find_all("td", recursive=False)
+            if "screen-only" not in (td.get("class") or [])
+        ]
+        if len(cells) > 2:
+            result["grade_sem1"] = _behavior_cell_value(cells[2])
+        if len(cells) > 4:
+            result["grade_year"] = _behavior_cell_value(cells[4])
+        for semester, idx in ((1, 1), (2, 3)):
+            if idx >= len(cells):
+                continue
+            td = cells[idx]
+            if result["points_start"] is None:
+                start = td.select_one('span[title*="Punkty startowe"]')
+                if start is not None:
+                    result["points_start"] = _behavior_points(start.get_text(strip=True))
+            result["entries"].extend(_parse_behavior_entries(td, semester))
+
+    result["entries"].sort(key=lambda e: e["date"], reverse=True)
+    if result["points_start"] is not None or result["entries"]:
+        result["system"] = "points"
+    return result
+
+
 def _grade_numeric_value(grade: str) -> float | None:
     """Numeric value of a Polish grade ('4+' → 4.5, '3-' → 2.75), else None."""
     grade = grade.strip()
@@ -482,6 +600,8 @@ class LibrusApiClient:
         self._rng = rng or random.Random()
         # Konto bez modulu ocen (LukMaverick/LibrusSynergiaHA#10) — loguj raz.
         self._grades_module_missing = False
+        # Zachowanie z ostatniego pobrania strony ocen (async_get_behavior).
+        self._behavior: dict[str, Any] | None = None
         # Szkola bez uwag w gateway API — ostrzegaj raz, potem debug.
         self._notes_warned = False
         self._attendance_warned = False
@@ -611,12 +731,34 @@ class LibrusApiClient:
                     return None
         return None
 
+    async def async_get_behavior(self) -> dict[str, Any] | None:
+        """Zachowanie z ostatniego pobrania ocen (odbior czysci bufor).
+
+        `{}` — strona ocen bez zachowania; None — oceny sie nie pobraly
+        (koordynator zostawia wtedy cache).
+        """
+        behavior, self._behavior = self._behavior, None
+        return behavior
+
     async def async_get_grades(self) -> list[dict[str, Any]] | None:
         """Get grades from Librus."""
         current_sem = _current_semester()
         _LOGGER.debug("Filtrowanie ocen dla semestru %d", current_sem)
+        self._behavior = None
 
         def _work(client: Client) -> list[dict[str, Any]]:
+            # Zachowanie jest na tej samej stronie co oceny — zapamietaj HTML
+            # odpowiedzi zamiast pobierac strone drugi raz.
+            pages: list[str] = []
+            orig_post = client.post
+
+            def _post(url: str, data: dict[str, str]) -> Any:
+                response = orig_post(url, data=data)
+                if url == client.GRADES_URL:
+                    pages.append(response.text)
+                return response
+
+            client.post = _post
             try:
                 numeric_grades, _avg, descriptive_grades = get_grades(client, "all")
             except TokenError:
@@ -633,8 +775,12 @@ class LibrusApiClient:
                         "tokenie) — oceny będą puste"
                     )
                     self._grades_module_missing = True
+                self._behavior = {}
                 return []
+            finally:
+                client.post = orig_post
             self._grades_module_missing = False
+            self._behavior = (_parse_behavior(pages[-1]) if pages else None) or {}
 
             all_grades: list[dict[str, Any]] = []
 

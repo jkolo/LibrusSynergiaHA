@@ -80,7 +80,7 @@ student_info, grades, grades_by_subject, messages,
 upcoming_exams (schedule filtrowany is_exam — dla next_exam/new_exam),
 schedule (pełny terminarz: event_type, is_exam, is_day_off, description, teacher, weekday, details),
 timetable, attendance, attendance_frequency, attendance_by_subject,
-announcements, homework (30 dni, due_date ISO), notes (uwagi z gateway API, od najnowszej), current_semester
+announcements, homework (30 dni, due_date ISO), notes (uwagi z gateway API, od najnowszej), behavior (zachowanie, {} gdy szkoła nie pokazuje), current_semester
 ```
 
 Atrybuty sensorów muszą zmieścić się w **16 KB** (limit recordera) — listy wystawiaj w widoku kompaktowym, a dla dużych list przycinaj z flagą (wzór: `_attrs_schedule` → `events_truncated`). Pełne dane trzymaj w kalendarzu.
@@ -109,13 +109,17 @@ Librus ma okresowe przerwy (zwykle raz dziennie). Wzorzec:
 
 ### Eventy do automatyzacji
 
-Od v3.0 zdarzenia to **encje `event.*`** (`event.py`), nie `hass.bus`. Koordynator w `_enqueue_events` odkłada payload do `_pending_events[<klucz>]`, a encja zdarzenia zdejmuje go przez `consume_pending_event()`. Klucze: `new_message`, `new_grade`, `new_exam`, `new_announcement`, `new_absence`, `new_homework`, `new_schedule_event`, `new_note`. Wyjątek: `librus_apix_nowa_wiadomosc` nadal leci też na bus (flaga `initial`).
+Od v3.0 zdarzenia to **encje `event.*`** (`event.py`), nie `hass.bus`. Koordynator w `_enqueue_events` odkłada payload do `_pending_events[<klucz>]`, a encja zdarzenia zdejmuje go przez `consume_pending_event()`. Klucze: `new_message`, `new_grade`, `new_exam`, `new_announcement`, `new_absence`, `new_homework`, `new_schedule_event`, `new_note`, `new_behavior_entry`. Wyjątek: `librus_apix_nowa_wiadomosc` nadal leci też na bus (flaga `initial`).
 
 **Pierwsze pobranie tylko zapamiętuje stan** w zbiorach `_seen_*` (LRU, `_seed_seen_sets_from_data`, flaga `_first_run`). Bez tego po (re)starcie wystrzeliłyby duplikaty dla wszystkich istniejących elementów. Nowa domena zdarzeń = nowy `_seen_*` + seed + pętla w `_enqueue_events`.
 
 ### Frekwencja
 
 Lista HTML (`get_attendance`) ma tylko nieobecności/spóźnienia/zwolnienia — **bez obecności**, więc nie licz z niej procentów (dawało 0,0). `attendance_frequency` i `attendance_by_subject` liczy `async_get_attendance_stats` z gateway API: `Attendances` (wszystkie wpisy, typ 100 = `ob`) + hurtowe `Lessons`/`Subjects` do mapowania lekcja→przedmiot (pojedyncze zapytania tylko awaryjnie, limit 30). Definicja jak w `librus-apix`: obecny = `ob`/`sp`/`wy`, mianownik = wszystkie wpisy — ta sama per przedmiot i ogółem. Lista HTML zostaje dla szczegółów nieobecności (daty, tematy, nauczyciele).
+
+### Zachowanie
+
+`librus-apix` nie parsuje wiersza „Zachowanie” ze strony ocen. `async_get_grades` na czas `get_grades` owija `client.post`, zapamiętuje HTML odpowiedzi `GRADES_URL` i parsuje go `_parse_behavior` — **bez drugiego zapytania**. Koordynator odbiera wynik przez `async_get_behavior()` zaraz po pętli fetcherów (kolejność jest losowa; odbiór czyści bufor, `None` = oceny się nie pobrały → cache). Sensor `zachowanie` (tekst: wystawiona przed przewidywaną) jest zawsze; `punkty_zachowania` (pkt, `MEASUREMENT`) tworzy listener dopiero, gdy `system == "points"` — stan liczbowy i tekstowy w jednej encji psułby historię. `new_behavior_entry` leci dla nowych wpisów punktowych (`type: entry`) i nowych ocen (`type: grade`).
 
 ### Uwagi
 
