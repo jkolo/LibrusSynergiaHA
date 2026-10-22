@@ -29,7 +29,7 @@ from homeassistant.util import dt as dt_util
 from librus_apix import urls as librus_urls
 from librus_apix.announcements import get_announcements
 from librus_apix.attendance import get_attendance, get_attendance_frequency
-from librus_apix.client import Client, new_client
+from librus_apix.client import Client, Token, new_client
 from librus_apix.exceptions import MaintananceError, TokenError
 from librus_apix.grades import get_grades
 from librus_apix.homework import get_homework
@@ -37,6 +37,7 @@ from librus_apix.messages import get_max_page_number, get_received
 from librus_apix.schedule import get_schedule
 from librus_apix.student_information import get_student_information
 from librus_apix.timetable import get_timetable
+from requests.cookies import RequestsCookieJar
 
 from ._data_store import LibrusDataStore
 from ._message_store import ReadMessagesStore
@@ -417,6 +418,19 @@ def _attendance_stats(
     }
 
 
+def isolated_client() -> Client:
+    """Nowy klient librus-apix z wlasnym tokenem i sloikiem ciasteczek.
+
+    `Client(extra_cookies=RequestsCookieJar())` i `new_client(token=Token())`
+    maja mutowalne wartosci domyslne — bez tego wszystkie konta w procesie HA
+    dziela jeden sloik (z `oauth_token`) i zapytanie jednego dziecka moze pojsc
+    z ciasteczkami drugiego (procaktomasz/LibrusSynergiaHA#45).
+    """
+    client = new_client(token=Token())
+    client.cookies = RequestsCookieJar()
+    return client
+
+
 def _token_still_valid(client: Client) -> bool:
     """True gdy token dziala — sonda na stronie informacji o uczniu."""
     try:
@@ -513,7 +527,7 @@ class LibrusApiClient:
                 # first request to /OAuth/Authorization uses urls.HEADERS.
                 self._apply_headers()
                 loop = asyncio.get_running_loop()
-                self._client = await loop.run_in_executor(None, new_client)
+                self._client = await loop.run_in_executor(None, isolated_client)
                 self._token = await loop.run_in_executor(
                     None, self._client.get_token, self.username, self.password
                 )
